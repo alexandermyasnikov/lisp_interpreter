@@ -60,6 +60,14 @@ namespace lisp_interpreter {
   };
 
 
+
+  bool is_null_list(const object_t::sptr_t& object) {
+    auto object_list = std::dynamic_pointer_cast<object_list_t>(object);
+    if (!object_list) return true;
+    if (!object_list->head) return true;
+    return false;
+  }
+
   // car (список) -> S-выражение.
   object_t::sptr_t car(const object_t::sptr_t& object) {
     auto object_list = std::dynamic_pointer_cast<object_list_t>(object);
@@ -90,7 +98,7 @@ namespace lisp_interpreter {
   struct shower_t {
     void show(object_t::sptr_t object) {
       std::cout << "(";
-      show_list(object); // XXX
+      show_list(object); // XXX некрасиво
       std::cout << ")";
     }
     void show_list(object_t::sptr_t object) {
@@ -102,7 +110,7 @@ namespace lisp_interpreter {
         if (auto object_list_head = std::dynamic_pointer_cast<object_list_t>(object_list->head); object_list_head) {
           std::cout << "(";
           show_list(object_list->head);
-          std::cout << ")";
+          std::cout << ") ";
         } else {
           show_list(object_list->head);
         }
@@ -130,17 +138,25 @@ namespace lisp_interpreter {
         if (c == '(') {
           std::cout << "push list" << std::endl;
           stack.emplace(std::make_shared<object_list_t>());
-          if (stack.size() == 1) {
-            //if (!object) // XXX
-              //object = stack.top();
-            //else
-              //object = cons(object, stack.top());;
-          }
         } else if (c == ')') {
           if (stack.empty()) throw std::runtime_error("unexpected ')'");
           std::cout << "pop list" << std::endl;
-          { std::cout << "  XXX list: "; shower_t().show(stack.top()); std::cout << std::endl; }
+
+          if (stack.size() == 1) {
+            if (!object)
+              object = stack.top();
+            else
+              object = cons(object, stack.top());
+          }
+
+          auto tmp = stack.top();
           stack.pop();
+
+          if (!stack.empty()) { // XXX иначе кинуть исключение
+            auto object_n = cons(tmp, stack.top());
+            stack.top().swap(object_n);
+          }
+
         } else if (std::isspace(c)) {
           ;
         } else if (auto itf = std::find_if(keywords.begin(), keywords.end(),
@@ -148,27 +164,31 @@ namespace lisp_interpreter {
                   return 0 == keyword.compare(0, keyword.size(), it,
                       0, std::min(keyword.size(), (size_t) (ite - it))); });
                   itf != keywords.end()) {
-          std::cout << "keyword: '" << *itf << "'" << std::endl;
+          auto object_atom = std::make_shared<object_atom_t>(*itf);
+          std::cout << "keyword: '" << object_atom->name << "'" << std::endl;
+          auto object_n = cons(object_atom, stack.top());
+          stack.top().swap(object_n);
           it += itf->size() - 1;
         } else if (std::isalnum(c)) {
           auto itf = std::find_if(it, ite, [](char c) { return !isalnum(c); });
           auto object_atom = std::make_shared<object_atom_t>(std::string(it, itf));
-          std::cout << "name: '" << object_atom->name << "'" << std::endl;
-          // auto object_n = cons(stack.top(), object_atom); // XXX
-          // stack.pop();
-          // stack.emplace(object_n);
+          std::cout << "variable: '" << object_atom->name << "'" << std::endl;
+          auto object_n = cons(object_atom, stack.top());
+          stack.top().swap(object_n);
           it += (itf - it) - 1;
         } else if (c == '"') {
           auto itf = std::find(it + 1, ite, '"');
-          auto object_atom = std::make_shared<object_atom_t>(std::string(it + 1, itf));
-          std::cout << "name: '" << object_atom->name << "'" << std::endl;
+          if (itf == ite) throw std::runtime_error("parse: expected '\"'");
+          auto object_atom = std::make_shared<object_atom_t>(std::string(it, itf + 1));
+          std::cout << "string: '" << object_atom->name << "'" << std::endl;
+          auto object_n = cons(object_atom, stack.top());
+          stack.top().swap(object_n);
           it += (itf - it);
         } else {
           throw std::runtime_error("parse: unknown char: '"s + c + "'");
         }
         ++it;
       }
-      std::cout << "stack.size(): " << stack.size() << std::endl;
       if (!stack.empty()) throw std::runtime_error("expected ')'");
       return object;
     }
@@ -222,8 +242,6 @@ int main() {
     shower_t().show(object);
     std::cout << std::endl;
   }
-
-  std::cout << "end." << std::endl;
 
   return 0;
 }
