@@ -66,7 +66,7 @@ namespace lisp_interpreter {
 
 
 
-  // I N T E R F A T E
+  // I N T E R F A C E
 
   object_t new_atom(const std::string& name) {
     return std::make_shared<object_atom_t>(name);
@@ -215,7 +215,7 @@ int main() {
 
 
 
-  // T E S T S
+  // T E S T
 
   {
     auto l = new_list();
