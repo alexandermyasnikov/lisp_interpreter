@@ -93,7 +93,6 @@ namespace lisp_interpreter {
     return std::get_if<object_list_sptr_t>(&object);
   }
 
-
   object_t car(object_t object) {
     if (!is_list(object)) return new_undefined();
     auto list = std::get<object_list_sptr_t>(object);
@@ -126,9 +125,9 @@ namespace lisp_interpreter {
       } else if (is_atom(object)) {
         str += std::get<object_atom_sptr_t>(object)->name + " ";
       } else if (is_list(object)) {
-        auto head = std::get<object_list_sptr_t>(object)->head; is_list(head);
+        auto head = car(object);
         str += is_list(head) ? show(head) : show_list(head);
-        str += show_list(std::get<object_list_sptr_t>(object)->tail);
+        str += show_list(cdr(object));
       }
       return str;
     }
@@ -143,17 +142,24 @@ namespace lisp_interpreter {
     object_t parse(const std::string& str) {
       const char *it = str.c_str();
       const char *ite = str.c_str() + str.size();
-      int value;
       while (it != ite) {
         char c = *it;
         if (c == '(') {
-          std::cout << "push list" << std::endl;
+          // std::cout << "push list" << std::endl;
           stack.emplace(new_list());
         } else if (c == ')') {
           if (stack.empty()) throw std::runtime_error("unexpected ')'");
-          std::cout << "pop list" << std::endl;
+          // std::cout << "pop list" << std::endl;
 
-          if (stack.size() == 1) {
+          auto list = stack.top();
+          auto list_r = new_list();
+          while (is_list(list)) {
+            list_r = cons(car(list), (list_r)); // reverse
+            list = cdr(list);
+          }
+          stack.top().swap(list_r);
+
+          if (stack.size() == 1) { // save object
             if (is_undefined(object))
               object = stack.top();
             else
@@ -163,7 +169,7 @@ namespace lisp_interpreter {
           auto tmp = stack.top();
           stack.pop();
 
-          if (!stack.empty()) { // XXX иначе кинуть исключение
+          if (!stack.empty()) {
             auto object_n = cons(tmp, stack.top());
             stack.top().swap(object_n);
           }
@@ -176,14 +182,14 @@ namespace lisp_interpreter {
                       0, std::min(keyword.size(), (size_t) (ite - it))); });
                   itf != keywords.end()) {
           auto object_atom = std::make_shared<object_atom_t>(*itf);
-          std::cout << "keyword: '" << object_atom->name << "'" << std::endl;
+          // std::cout << "keyword: '" << object_atom->name << "'" << std::endl;
           auto object_n = cons(object_atom, stack.top());
           stack.top().swap(object_n);
           it += itf->size() - 1;
         } else if (std::isalnum(c)) {
           auto itf = std::find_if(it, ite, [](char c) { return !isalnum(c); });
           auto object_atom = std::make_shared<object_atom_t>(std::string(it, itf));
-          std::cout << "variable: '" << object_atom->name << "'" << std::endl;
+          // std::cout << "variable: '" << object_atom->name << "'" << std::endl;
           auto object_n = cons(object_atom, stack.top());
           stack.top().swap(object_n);
           it += (itf - it) - 1;
@@ -191,14 +197,14 @@ namespace lisp_interpreter {
           auto itf = std::find(it + 1, ite, '"');
           if (itf == ite) throw std::runtime_error("parse: expected '\"'");
           auto object_atom = std::make_shared<object_atom_t>(std::string(it, itf + 1));
-          std::cout << "string: '" << object_atom->name << "'" << std::endl;
+          // std::cout << "string: '" << object_atom->name << "'" << std::endl;
           auto object_n = cons(object_atom, stack.top());
           stack.top().swap(object_n);
           it += (itf - it);
         }
         ++it;
       }
-      // XXX if (!stack.empty()) throw std::runtime_error("expected ')'");
+      if (!stack.empty()) throw std::runtime_error("expected ')'");
       return object;
     }
   };
@@ -241,9 +247,14 @@ int main() {
 
     assert(shower_t().show(expr) == "(* 2 (+ 3 4 ) ) ");
   }
+  {
+    std::string str = R"LISP((1 29 abc (  + 1   "2" 34 ("a" "b" "c")) 56 78 ))LISP";
+    auto object = parser_t().parse(str);
+    assert(shower_t().show(object) == R"LISP((1 29 abc (+ 1 "2" 34 ("a" "b" "c" ) ) 56 78 ) )LISP");
+  }
 
   {
-    std::string str = R"LISP((1 29 abc (  + 1   "2" 34) 56 78 ))LISP";
+    std::string str = R"LISP((1 29 abc (  + 1   "2" 34 ("a" "b" "c")) 56 78 ))LISP";
     std::cout << "input: " << str << std::endl;
     auto object = parser_t().parse(str);
     std::cout << "output: " << shower_t().show(object) << std::endl;
