@@ -1,14 +1,14 @@
 
 #include <iostream>
-#include <string_view>
 #include <memory>
 #include <vector>
 #include <stack>
-#include <charconv>
+#include <variant>
 #include <algorithm>
 
-#define PR       std::cout << __FUNCTION__ << '\t' << __LINE__ << std::endl
-#define PRM(msg) std::cout << __FUNCTION__ << '\t' << __LINE__ << '\t' << msg << std::endl
+#define PR        std::cout << __FUNCTION__ << '\t' << __LINE__ << std::endl
+#define PRM(msg)  std::cout << __FUNCTION__ << '\t' << __LINE__ << '\t' << msg << std::endl
+#define assert(x) if (!(x)) PRM("ASSERT " #x)
 
 
 
@@ -19,7 +19,7 @@ namespace lisp_interpreter {
   // syntax
   // list:  LIST head tail | LIST Undefined Undefined
   // head:  list | atom
-  // tail:  list
+  // tail:  list | atom
   // atom:  keyword: digit+ | digit+.digit+ | char[char|digit|-]*
 
   // syntax. example
@@ -28,25 +28,29 @@ namespace lisp_interpreter {
   // (1 2) -> LIST 1 (LIST 2 (LIST Undefined Undefined))
   // (1 (2)) -> LIST 1 (LIST (LIST 2 (LIST Undefined Undefined)) (LIST Undefined Undefined))
 
-  struct object_t {
-    using sptr_t = std::shared_ptr<object_t>;
-    virtual ~object_t() { }
+  struct object_undefined_t;
+  struct object_atom_t;
+  struct object_list_t;
+
+  using object_undefined_sptr_t = std::shared_ptr<const object_undefined_t>;
+  using object_atom_sptr_t = std::shared_ptr<const object_atom_t>;
+  using object_list_sptr_t = std::shared_ptr<const object_list_t>;
+
+  using object_t = std::variant<
+    object_undefined_sptr_t,
+    object_atom_sptr_t,
+    object_list_sptr_t>;
+
+  struct object_undefined_t { };
+
+  struct object_list_t {
+    object_t head;
+    object_t tail;
+
+    object_list_t(object_t head, object_t tail) : head(head), tail(tail) { }
   };
 
-  struct object_list_t : object_t {
-    using sptr_t = std::shared_ptr<object_list_t>;
-
-    object_t::sptr_t        head;
-    object_list_t::sptr_t   tail;
-
-    object_list_t(object_t::sptr_t head, object_list_t::sptr_t tail) : head(head), tail(tail) { }
-    object_list_t(object_t::sptr_t head) : head(head), tail(nullptr) { }
-    object_list_t() : head(nullptr), tail(nullptr) { }
-  };
-
-  struct object_atom_t : object_t {
-    using sptr_t = std::shared_ptr<object_atom_t>;
-
+  struct object_atom_t {
     std::string name;
 
     object_atom_t(const std::string& name) : name(name) { }
@@ -61,75 +65,82 @@ namespace lisp_interpreter {
 
 
 
-  bool is_null_list(const object_t::sptr_t& object) {
-    auto object_list = std::dynamic_pointer_cast<object_list_t>(object);
-    if (!object_list) return true;
-    if (!object_list->head) return true;
-    return false;
+
+  // I N T E R F A T E
+
+  object_t new_atom(const std::string& name) {
+    return std::make_shared<object_atom_t>(name);
   }
 
-  // car (список) -> S-выражение.
-  object_t::sptr_t car(const object_t::sptr_t& object) {
-    auto object_list = std::dynamic_pointer_cast<object_list_t>(object);
-    if (!object_list) throw std::runtime_error("car: expected list");
-    if (!object_list->head) throw std::runtime_error("car: head not exist");
-    return object_list->head;
+  object_t new_undefined() {
+    static auto undefined = std::make_shared<object_undefined_t>();
+    return undefined;
   }
 
-  // cdr (список) -> список
-  object_t::sptr_t cdr(const object_t::sptr_t& object) {
-    auto object_list = std::dynamic_pointer_cast<object_list_t>(object);
-    if (!object_list) throw std::runtime_error("cdr: expected list");
-    if (!object_list->head) throw std::runtime_error("cdr: tail not exist");
-    return object_list->tail;
+  object_t new_list() {
+    return std::make_shared<object_list_t>(new_undefined(), new_undefined());
   }
 
-  // cons (s-выражение, список) -> список
-  object_t::sptr_t cons(const object_t::sptr_t& head, const object_t::sptr_t& tail) {
-    auto tail_list = std::dynamic_pointer_cast<object_list_t>(tail);
-    if (!tail_list) throw std::runtime_error("cons: expected list");
+  bool is_undefined(object_t object) {
+    return std::get_if<object_undefined_sptr_t>(&object);
+  }
 
-    auto object_list = std::make_shared<object_list_t>(head, tail_list);
-    return object_list;
+  bool is_atom(object_t object) {
+    return std::get_if<object_atom_sptr_t>(&object);
+  }
+
+  bool is_list(object_t object) {
+    return std::get_if<object_list_sptr_t>(&object);
+  }
+
+
+  object_t car(object_t object) {
+    if (!is_list(object)) return new_undefined();
+    auto list = std::get<object_list_sptr_t>(object);
+    if (is_undefined(list->head)) return new_undefined();
+    return list->head;
+  }
+
+  object_t cdr(object_t object) {
+    if (!is_list(object)) return new_undefined();
+    auto list = std::get<object_list_sptr_t>(object);
+    if (is_undefined(list->tail)) return new_undefined();
+    return list->tail;
+  }
+
+  object_t cons(object_t head, object_t tail) {
+    return std::make_shared<object_list_t>(head, tail);
   }
 
 
 
   struct shower_t {
-    void show(object_t::sptr_t object) {
-      std::cout << "(";
-      show_list(object); // XXX некрасиво
-      std::cout << ")";
+    std::string show(object_t object) {
+      return "(" + show_list(object) + ") ";
     }
-    void show_list(object_t::sptr_t object) {
-      if (!object) {
-        return;
+    std::string show_list(object_t object) {
+      std::string str;
+      std::get_if<object_list_sptr_t>(&object);
+      if (is_undefined(object)) {
+        ;
+      } else if (is_atom(object)) {
+        str += std::get<object_atom_sptr_t>(object)->name + " ";
+      } else if (is_list(object)) {
+        auto head = std::get<object_list_sptr_t>(object)->head; is_list(head);
+        str += is_list(head) ? show(head) : show_list(head);
+        str += show_list(std::get<object_list_sptr_t>(object)->tail);
       }
-
-      if (auto object_list = std::dynamic_pointer_cast<object_list_t>(object); object_list) {
-        if (auto object_list_head = std::dynamic_pointer_cast<object_list_t>(object_list->head); object_list_head) {
-          std::cout << "(";
-          show_list(object_list->head);
-          std::cout << ") ";
-        } else {
-          show_list(object_list->head);
-        }
-        show_list(object_list->tail);
-      } else if (auto object_atom = std::dynamic_pointer_cast<object_atom_t>(object); object_atom) {
-        std::cout << object_atom->name << " ";
-      } else {
-          throw std::runtime_error("show_list: unknown type");
-      }
+      return str;
     }
   };
 
 
 
   struct parser_t {
-    std::stack<object_t::sptr_t> stack;
-    object_t::sptr_t object = nullptr;
+    std::stack<object_t> stack;
+    object_t object = new_undefined();
 
-    object_t::sptr_t parse(const std::string& str) {
+    object_t parse(const std::string& str) {
       const char *it = str.c_str();
       const char *ite = str.c_str() + str.size();
       int value;
@@ -137,13 +148,13 @@ namespace lisp_interpreter {
         char c = *it;
         if (c == '(') {
           std::cout << "push list" << std::endl;
-          stack.emplace(std::make_shared<object_list_t>());
+          stack.emplace(new_list());
         } else if (c == ')') {
           if (stack.empty()) throw std::runtime_error("unexpected ')'");
           std::cout << "pop list" << std::endl;
 
           if (stack.size() == 1) {
-            if (!object)
+            if (is_undefined(object))
               object = stack.top();
             else
               object = cons(object, stack.top());
@@ -184,12 +195,10 @@ namespace lisp_interpreter {
           auto object_n = cons(object_atom, stack.top());
           stack.top().swap(object_n);
           it += (itf - it);
-        } else {
-          throw std::runtime_error("parse: unknown char: '"s + c + "'");
         }
         ++it;
       }
-      if (!stack.empty()) throw std::runtime_error("expected ')'");
+      // XXX if (!stack.empty()) throw std::runtime_error("expected ')'");
       return object;
     }
   };
@@ -198,49 +207,46 @@ namespace lisp_interpreter {
 int main() {
   using namespace lisp_interpreter;
 
+
+
+  // T E S T S
+
   {
-    auto l_ex1 = std::make_shared<object_list_t>(
-        std::make_shared<object_atom_t>("*"),
-        std::make_shared<object_list_t>(
-          std::make_shared<object_atom_t>("2"),
-          std::make_shared<object_list_t>(
-            std::make_shared<object_list_t>(
-              std::make_shared<object_atom_t>("+"),
-              std::make_shared<object_list_t>(
-                std::make_shared<object_atom_t>("3"),
-                std::make_shared<object_list_t>(
-                  std::make_shared<object_atom_t>("4")
-                  )
-                )
-              )
-            )
-          )
-        );
+    auto l = new_list();
+    assert(is_list(l));
+    assert(is_undefined(car(l)));
+    assert(is_undefined(cdr(l)));
+  }
+  {
+    auto u = new_undefined();
+    auto l = cons(new_atom("1"), u);
+    assert(is_list(l));
+    assert(!is_undefined(car(l)));
+    assert(is_undefined(cdr(l)));
+  }
+  {
+    auto expr = cons(
+        new_atom("*"),
+        cons(
+          new_atom("2"),
+          cons(
+            cons(
+              new_atom("+"),
+              cons(
+                new_atom("3"),
+                cons(
+                  new_atom("4"),
+                  new_undefined()))),
+            new_undefined())));
 
-    auto l_ex2 = std::make_shared<object_atom_t>("1");
-
-    auto l_ex3 = std::make_shared<object_list_t>(
-        std::make_shared<object_atom_t>("1")
-        );
-
-    auto l_ex4 = std::make_shared<object_list_t>(
-        std::make_shared<object_list_t>(
-          std::make_shared<object_atom_t>("2")
-          )
-        );
-
-    // shower_t().show(l_ex1);
-    // std::cout << std::endl;
+    assert(shower_t().show(expr) == "(* 2 (+ 3 4 ) ) ");
   }
 
   {
     std::string str = R"LISP((1 29 abc (  + 1   "2" 34) 56 78 ))LISP";
     std::cout << "input: " << str << std::endl;
-
     auto object = parser_t().parse(str);
-
-    shower_t().show(object);
-    std::cout << std::endl;
+    std::cout << "output: " << shower_t().show(object) << std::endl;
   }
 
   return 0;
