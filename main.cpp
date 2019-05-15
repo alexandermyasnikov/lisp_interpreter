@@ -178,6 +178,7 @@ namespace lisp_interpreter {
                   itf != keywords.end()) {
           auto object_atom = std::make_shared<object_atom_t>(*itf);
           // std::cout << "keyword: '" << object_atom->name << "'" << std::endl;
+          if (stack.empty()) throw std::runtime_error("parse: expected list");
           auto object_n = cons(object_atom, stack.top());
           stack.top().swap(object_n);
           it += itf->size() - 1;
@@ -185,6 +186,7 @@ namespace lisp_interpreter {
           auto itf = std::find_if(it, ite, [](char c) { return !isalnum(c); });
           auto object_atom = std::make_shared<object_atom_t>(std::string(it, itf));
           // std::cout << "variable: '" << object_atom->name << "'" << std::endl;
+          if (stack.empty()) throw std::runtime_error("parse: expected list");
           auto object_n = cons(object_atom, stack.top());
           stack.top().swap(object_n);
           it += (itf - it) - 1;
@@ -193,6 +195,7 @@ namespace lisp_interpreter {
           if (itf == ite) throw std::runtime_error("parse: expected '\"'");
           auto object_atom = std::make_shared<object_atom_t>(std::string(it, itf + 1));
           // std::cout << "string: '" << object_atom->name << "'" << std::endl;
+          if (stack.empty()) throw std::runtime_error("parse: expected list");
           auto object_n = cons(object_atom, stack.top());
           stack.top().swap(object_n);
           it += (itf - it);
