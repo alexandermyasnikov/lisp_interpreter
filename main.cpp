@@ -96,14 +96,12 @@ namespace lisp_interpreter {
   object_t car(object_t object) {
     if (!is_list(object)) return new_undefined();
     auto list = std::get<object_list_sptr_t>(object);
-    if (is_undefined(list->head)) return new_undefined();
     return list->head;
   }
 
   object_t cdr(object_t object) {
     if (!is_list(object)) return new_undefined();
     auto list = std::get<object_list_sptr_t>(object);
-    if (is_undefined(list->tail)) return new_undefined();
     return list->tail;
   }
 
@@ -154,16 +152,13 @@ namespace lisp_interpreter {
           auto list = stack.top();
           auto list_r = new_list();
           while (is_list(list)) {
-            list_r = cons(car(list), (list_r)); // reverse
+            list_r = cons(car(list), list_r); // reverse
             list = cdr(list);
           }
           stack.top().swap(list_r);
 
           if (stack.size() == 1) { // save object
-            if (is_undefined(object))
-              object = stack.top();
-            else
-              object = cons(object, stack.top());
+            object = cons(object, stack.top());
           }
 
           auto tmp = stack.top();
