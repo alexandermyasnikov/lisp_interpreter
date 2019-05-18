@@ -147,7 +147,7 @@ namespace lisp_interpreter {
     if (!is_list(object))
       return object;
     auto list_r = list();
-    while (is_list(object)) {
+    while (is_list(object) && !is_error(car(object))) {
       list_r = cons(reverse(car(object)), list_r);
       object = cdr(object);
     }
@@ -208,7 +208,7 @@ namespace lisp_interpreter {
           stack.emplace(list());
         } else if (c == ')') {
           // std::cout << "pop list" << std::endl;
-          if (stack.empty()) throw std::runtime_error("unexpected ')'");
+          if (stack.empty()) return error("unexpected ')' on pos " + std::to_string(it - str.c_str()));
 
           auto tmp = stack.top();
           stack.pop();
@@ -227,7 +227,7 @@ namespace lisp_interpreter {
           auto object_atom = std::make_shared<object_atom_t>(*itf);
           // std::cout << "keyword: '" << object_atom->name << "'" << std::endl;
           if (stack.empty()) {
-            // object = cons(object_atom, object);
+            object = cons(object_atom, object);
           } else {
             auto object_n = cons(object_atom, stack.top());
             stack.top().swap(object_n);
@@ -238,9 +238,7 @@ namespace lisp_interpreter {
           auto object_atom = std::make_shared<object_atom_t>(std::string(it, itf));
           // std::cout << "variable: '" << object_atom->name << "'" << std::endl;
           if (stack.empty()) {
-            // XXX
-            // object = cons(object_atom, object);
-            // *object = (object) ? cons(object_atom, *object) : cons(object_atom, list());
+            object = cons(object_atom, object);
           } else {
             auto object_n = cons(object_atom, stack.top());
             stack.top().swap(object_n);
@@ -248,11 +246,11 @@ namespace lisp_interpreter {
           it += (itf - it) - 1;
         } else if (c == '"') {
           auto itf = std::find(it + 1, ite, '"');
-          if (itf == ite) throw std::runtime_error("parse: expected '\"'");
+          if (itf == ite) return error("parse: expected '\"' on pos " + std::to_string(it - str.c_str()));
           auto object_atom = std::make_shared<object_atom_t>(std::string(it, itf + 1));
           // std::cout << "string: '" << object_atom->name << "'" << std::endl;
           if (stack.empty()) {
-            // object = cons(object_atom, object);
+            object = cons(object_atom, object);
           } else {
             auto object_n = cons(object_atom, stack.top());
             stack.top().swap(object_n);
@@ -261,7 +259,9 @@ namespace lisp_interpreter {
         }
         ++it;
       }
-      if (!stack.empty()) throw std::runtime_error("expected ')'");
+      if (!stack.empty()) return error("expected ')' on pos " + std::to_string(it - str.c_str()));
+      // Если список один, то дополнительные скобки не нужны.
+      if (is_error(cdr(object))) object = car(object);
       return reverse(object);
     }
   };
@@ -332,7 +332,47 @@ int main() {
   }
 
   {
-    std::string str = R"LISP((1 2 (3)) (4) (5))LISP";
+    std::string str = R"LISP((1 2 3) )LISP";
+    auto l = parser_t().parse(str);
+    assert(shower_t().show_n(l) == R"LISP(LIST ( 1 ) ( LIST ( 2 ) ( LIST ( 3 ) ( U ) ) ) )LISP");
+    assert(shower_t().show(l) == R"LISP(( 1 2 3 ) )LISP");
+  }
+
+  {
+    std::string str = R"LISP(1 2 3 )LISP";
+    auto l = parser_t().parse(str);
+    assert(shower_t().show_n(l) == R"LISP(LIST ( 1 ) ( LIST ( 2 ) ( LIST ( 3 ) ( U ) ) ) )LISP");
+    assert(shower_t().show(l) == R"LISP(( 1 2 3 ) )LISP");
+  }
+
+  {
+    std::string str = R"LISP(1 2 3 )LISP";
+    auto l = parser_t().parse(str);
+    assert(shower_t().show_n(l) == R"LISP(LIST ( 1 ) ( LIST ( 2 ) ( LIST ( 3 ) ( U ) ) ) )LISP");
+    assert(shower_t().show(l) == R"LISP(( 1 2 3 ) )LISP");
+  }
+
+  {
+    std::string str = R"LISP(())LISP";
+    auto l = parser_t().parse(str);
+    assert(shower_t().show_n(l) == R"LISP(LIST ( U ) ( U ) )LISP");
+    assert(shower_t().show(l) == R"LISP(( ) )LISP");
+  }
+
+  {
+    std::string str = R"LISP(( 1 2 3 )LISP";
+    auto l = parser_t().parse(str);
+    assert(is_error(l));
+  }
+
+  {
+    std::string str = R"LISP(1 (2 3 )LISP";
+    auto l = parser_t().parse(str);
+    assert(is_error(l));
+  }
+
+  {
+    std::string str = R"LISP(2 () )LISP";
     std::cout << "input: '" << str << "'" << std::endl;
     auto object = parser_t().parse(str);
     std::cout << "output: '" << shower_t().show(object) << "'" << std::endl;
