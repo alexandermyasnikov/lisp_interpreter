@@ -17,17 +17,8 @@ using namespace std::string_literals;
 
 namespace lisp_interpreter {
 
-  // syntax
-  // list:  LIST head tail | LIST Undefined Undefined
-  // head:  list | atom
-  // tail:  list | atom
-  // atom:  keyword: digit+ | digit+.digit+ | char[char|digit|-]*
-
-  // syntax. example
-  // () -> LIST Undefined Undefined
-  // (1) -> LIST 1 (LIST Undefined Undefined)
-  // (1 2) -> LIST 1 (LIST 2 (LIST Undefined Undefined))
-  // (1 (2)) -> LIST 1 (LIST (LIST 2 (LIST Undefined Undefined)) (LIST Undefined Undefined))
+  template<class... Ts> struct overloaded : Ts... { using Ts::operator()...; };
+  template<class... Ts> overloaded(Ts...) -> overloaded<Ts...>;
 
   struct object_undefined_t;
   struct object_error_t;
@@ -165,29 +156,38 @@ namespace lisp_interpreter {
 
     std::string show_list(object_t object) {
       std::string str;
-      if (is_atom(object)) {
-        str += std::get<object_atom_sptr_t>(object)->name + " ";
-      } else if (is_list(object)) {
-        auto head = car(object);
-        str += is_list(head) ? "( " + show_list(head) + ") " : show_list(head);
-        str += show_list(cdr(object));
-      }
+      std::visit(overloaded {
+          [&str] (object_atom_sptr_t atom) {
+            str += atom->name + " ";
+          },
+          [&str, &object, this] (object_list_sptr_t) {
+            auto head = car(object);
+            str += is_list(head) ? "( " + show_list(head) + ") " : show_list(head);
+            str += show_list(cdr(object));
+          },
+          [] (auto arg) { },
+      }, object);
       return str;
     }
 
     std::string show_n(object_t object) {
       std::string str;
-      if (is_undefined(object)) {
-        str += "U ";
-      } else if (is_atom(object)) {
-        str += std::get<object_atom_sptr_t>(object)->name + " ";
-      } else if (is_list(object)) {
-        auto head = is_error(car(object)) ? undefined() : car(object); // XXX сомнительно
-        auto tail = is_error(cdr(object)) ? undefined() : cdr(object);
-        str += "LIST ( " + show_n(head) + ") ( " + show_n(tail) + ") ";
-      } else if (is_error(object)) {
-        str += "E ";
-      }
+      std::visit(overloaded {
+          [&str] (object_undefined_sptr_t) {
+            str += "U ";
+          },
+          [&str] (object_error_sptr_t) {
+            str += "E ";
+          },
+          [&str] (object_atom_sptr_t atom) {
+            str += atom->name + " ";
+          },
+          [&str, &object, this] (object_list_sptr_t) {
+            auto head = is_error(car(object)) ? undefined() : car(object); // XXX сомнительно
+            auto tail = is_error(cdr(object)) ? undefined() : cdr(object);
+            str += "LIST ( " + show_n(head) + ") ( " + show_n(tail) + ") ";
+          },
+      }, object);
       return str;
     }
   };
@@ -204,10 +204,8 @@ namespace lisp_interpreter {
       while (it != ite) {
         char c = *it;
         if (c == '(') {
-          // std::cout << "push list" << std::endl;
           stack.emplace(list());
         } else if (c == ')') {
-          // std::cout << "pop list" << std::endl;
           if (stack.empty()) return error("unexpected ')' on pos " + std::to_string(it - str.c_str()));
 
           auto tmp = stack.top();
@@ -216,7 +214,7 @@ namespace lisp_interpreter {
           if (!stack.empty()) {
             auto object_n = cons(tmp, stack.top());
             stack.top().swap(object_n);
-          } else if (stack.empty()) { // save object
+          } else {
             object = cons(tmp, object);
           }
         } else if (auto itf = std::find_if(keywords.begin(), keywords.end(),
@@ -260,8 +258,7 @@ namespace lisp_interpreter {
         ++it;
       }
       if (!stack.empty()) return error("expected ')' on pos " + std::to_string(it - str.c_str()));
-      // Если список один, то дополнительные скобки не нужны.
-      if (is_error(cdr(object))) object = car(object);
+      if (is_error(cdr(object))) object = car(object); // Если список один, то дополнительные скобки не нужны.
       return reverse(object);
     }
   };
