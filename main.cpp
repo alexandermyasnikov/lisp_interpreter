@@ -147,19 +147,13 @@ namespace lisp_interpreter {
     return list_r;
   }
 
-  std::string show(object_t object) {
-    if (is_error(object))
-      return std::get<object_error_sptr_t>(object)->msg + " ";
-    return is_list(object) ? "( " + show_list(object) + ") " : show_list(object);
-  }
-
   std::string show_list(object_t object) { // private
     std::string str;
     std::visit(overloaded {
         [&str] (object_atom_sptr_t atom) {
           str += atom->name + " ";
         },
-        [&str, &object, this] (object_list_sptr_t) {
+        [&str, &object] (object_list_sptr_t) {
           auto head = car(object);
           str += is_list(head) ? "( " + show_list(head) + ") " : show_list(head);
           str += show_list(cdr(object));
@@ -167,6 +161,12 @@ namespace lisp_interpreter {
         [] (auto arg) { },
     }, object);
     return str;
+  }
+
+  std::string show(object_t object) {
+    if (is_error(object))
+      return std::get<object_error_sptr_t>(object)->msg + " ";
+    return is_list(object) ? "( " + show_list(object) + ") " : show_list(object);
   }
 
   std::string show_stucture(object_t object) {
@@ -181,7 +181,7 @@ namespace lisp_interpreter {
         [&str] (object_atom_sptr_t atom) {
           str += atom->name + " ";
         },
-        [&str, &object, this] (object_list_sptr_t) {
+        [&str, &object] (object_list_sptr_t) {
           auto head = is_error(car(object)) ? undefined() : car(object); // XXX сомнительно
           auto tail = is_error(cdr(object)) ? undefined() : cdr(object);
           str += "LIST ( " + show_stucture(head) + ") ( " + show_stucture(tail) + ") ";
@@ -267,40 +267,40 @@ int main() {
   {
     auto a = atom("a");
     assert(is_atom(a));
-    assert(shower_t().show(a) == R"LISP(a )LISP");
-    assert(shower_t().show_stucture(a) == R"LISP(a )LISP");
+    assert(show(a) == R"LISP(a )LISP");
+    assert(show_stucture(a) == R"LISP(a )LISP");
   }
 
   {
     auto l = list();
     assert(is_error(car(l)));
     assert(is_error(cdr(l)));
-    assert(shower_t().show_stucture(l) == R"LISP(LIST ( U ) ( U ) )LISP");
-    assert(shower_t().show(l) == R"LISP(( ) )LISP");
+    assert(show_stucture(l) == R"LISP(LIST ( U ) ( U ) )LISP");
+    assert(show(l) == R"LISP(( ) )LISP");
   }
 
   {
     auto l = cons(atom("a"), list());
     assert(is_atom(car(l)));
     assert(is_error(cdr(l)));
-    assert(shower_t().show_stucture(l) == R"LISP(LIST ( a ) ( U ) )LISP");
-    assert(shower_t().show(l) == R"LISP(( a ) )LISP");
+    assert(show_stucture(l) == R"LISP(LIST ( a ) ( U ) )LISP");
+    assert(show(l) == R"LISP(( a ) )LISP");
   }
 
   {
     auto l = cons(atom("a"), cons(atom("b"), list()));
     assert(is_atom(car(l)));
     assert(is_list(cdr(l)));
-    assert(shower_t().show_stucture(l) == R"LISP(LIST ( a ) ( LIST ( b ) ( U ) ) )LISP");
-    assert(shower_t().show(l) == R"LISP(( a b ) )LISP");
+    assert(show_stucture(l) == R"LISP(LIST ( a ) ( LIST ( b ) ( U ) ) )LISP");
+    assert(show(l) == R"LISP(( a b ) )LISP");
   }
 
   {
     auto l = cons(list(), cons(atom("b"), list()));
     assert(is_list(car(l)));
     assert(is_list(cdr(l)));
-    assert(shower_t().show_stucture(l) == R"LISP(LIST ( LIST ( U ) ( U ) ) ( LIST ( b ) ( U ) ) )LISP");
-    assert(shower_t().show(l) == R"LISP(( ( ) b ) )LISP");
+    assert(show_stucture(l) == R"LISP(LIST ( LIST ( U ) ( U ) ) ( LIST ( b ) ( U ) ) )LISP");
+    assert(show(l) == R"LISP(( ( ) b ) )LISP");
   }
 
   {
@@ -318,35 +318,35 @@ int main() {
                   list()))),
             list())));
 
-    assert(shower_t().show(expr) == "( * 2 ( + 3 4 ) ) ");
+    assert(show(expr) == "( * 2 ( + 3 4 ) ) ");
   }
 
   {
     std::string str = R"LISP((1 2 3) )LISP";
     auto l = parse(str);
-    assert(shower_t().show_stucture(l) == R"LISP(LIST ( 1 ) ( LIST ( 2 ) ( LIST ( 3 ) ( U ) ) ) )LISP");
-    assert(shower_t().show(l) == R"LISP(( 1 2 3 ) )LISP");
+    assert(show_stucture(l) == R"LISP(LIST ( 1 ) ( LIST ( 2 ) ( LIST ( 3 ) ( U ) ) ) )LISP");
+    assert(show(l) == R"LISP(( 1 2 3 ) )LISP");
   }
 
   {
     std::string str = R"LISP(1 2 3 )LISP";
     auto l = parse(str);
-    assert(shower_t().show_stucture(l) == R"LISP(LIST ( 1 ) ( LIST ( 2 ) ( LIST ( 3 ) ( U ) ) ) )LISP");
-    assert(shower_t().show(l) == R"LISP(( 1 2 3 ) )LISP");
+    assert(show_stucture(l) == R"LISP(LIST ( 1 ) ( LIST ( 2 ) ( LIST ( 3 ) ( U ) ) ) )LISP");
+    assert(show(l) == R"LISP(( 1 2 3 ) )LISP");
   }
 
   {
     std::string str = R"LISP(1 2 3 )LISP";
     auto l = parse(str);
-    assert(shower_t().show_stucture(l) == R"LISP(LIST ( 1 ) ( LIST ( 2 ) ( LIST ( 3 ) ( U ) ) ) )LISP");
-    assert(shower_t().show(l) == R"LISP(( 1 2 3 ) )LISP");
+    assert(show_stucture(l) == R"LISP(LIST ( 1 ) ( LIST ( 2 ) ( LIST ( 3 ) ( U ) ) ) )LISP");
+    assert(show(l) == R"LISP(( 1 2 3 ) )LISP");
   }
 
   {
     std::string str = R"LISP(())LISP";
     auto l = parse(str);
-    assert(shower_t().show_stucture(l) == R"LISP(LIST ( U ) ( U ) )LISP");
-    assert(shower_t().show(l) == R"LISP(( ) )LISP");
+    assert(show_stucture(l) == R"LISP(LIST ( U ) ( U ) )LISP");
+    assert(show(l) == R"LISP(( ) )LISP");
   }
 
   {
@@ -365,8 +365,8 @@ int main() {
     std::string str = R"LISP(2 () )LISP";
     std::cout << "input: '" << str << "'" << std::endl;
     auto object = parse(str);
-    std::cout << "output: '" << shower_t().show(object) << "'" << std::endl;
-    std::cout << "output: '" << shower_t().show_stucture(object) << "'" << std::endl;
+    std::cout << "output: '" << show(object) << "'" << std::endl;
+    std::cout << "output: '" << show_stucture(object) << "'" << std::endl;
   }
 
   return 0;
