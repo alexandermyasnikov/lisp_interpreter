@@ -158,7 +158,7 @@ namespace lisp_interpreter {
           str += is_list(head) ? "( " + show_list(head) + ") " : show_list(head);
           str += show_list(cdr(object));
         },
-        [] (auto arg) { },
+        [] (auto) { },
     }, object);
     return str;
   }
