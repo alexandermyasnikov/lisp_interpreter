@@ -132,6 +132,8 @@ namespace lisp_interpreter {
     return std::make_shared<object_list_t>(head, tail);
   }
 
+
+
   // L I B R A R Y
 
   object_t reverse(object_t object) {
@@ -145,123 +147,114 @@ namespace lisp_interpreter {
     return list_r;
   }
 
+  std::string show(object_t object) {
+    if (is_error(object))
+      return std::get<object_error_sptr_t>(object)->msg + " ";
+    return is_list(object) ? "( " + show_list(object) + ") " : show_list(object);
+  }
 
+  std::string show_list(object_t object) { // private
+    std::string str;
+    std::visit(overloaded {
+        [&str] (object_atom_sptr_t atom) {
+          str += atom->name + " ";
+        },
+        [&str, &object, this] (object_list_sptr_t) {
+          auto head = car(object);
+          str += is_list(head) ? "( " + show_list(head) + ") " : show_list(head);
+          str += show_list(cdr(object));
+        },
+        [] (auto arg) { },
+    }, object);
+    return str;
+  }
 
-  struct shower_t {
-    std::string show(object_t object) {
-      if (is_error(object))
-        return std::get<object_error_sptr_t>(object)->msg + " ";
-      return is_list(object) ? "( " + show_list(object) + ") " : show_list(object);
-    }
+  std::string show_stucture(object_t object) {
+    std::string str;
+    std::visit(overloaded {
+        [&str] (object_undefined_sptr_t) {
+          str += "U ";
+        },
+        [&str] (object_error_sptr_t) {
+          str += "E ";
+        },
+        [&str] (object_atom_sptr_t atom) {
+          str += atom->name + " ";
+        },
+        [&str, &object, this] (object_list_sptr_t) {
+          auto head = is_error(car(object)) ? undefined() : car(object); // XXX сомнительно
+          auto tail = is_error(cdr(object)) ? undefined() : cdr(object);
+          str += "LIST ( " + show_stucture(head) + ") ( " + show_stucture(tail) + ") ";
+        },
+    }, object);
+    return str;
+  }
 
-    std::string show_list(object_t object) {
-      std::string str;
-      std::visit(overloaded {
-          [&str] (object_atom_sptr_t atom) {
-            str += atom->name + " ";
-          },
-          [&str, &object, this] (object_list_sptr_t) {
-            auto head = car(object);
-            str += is_list(head) ? "( " + show_list(head) + ") " : show_list(head);
-            str += show_list(cdr(object));
-          },
-          [] (auto arg) { },
-      }, object);
-      return str;
-    }
-
-    std::string show_n(object_t object) {
-      std::string str;
-      std::visit(overloaded {
-          [&str] (object_undefined_sptr_t) {
-            str += "U ";
-          },
-          [&str] (object_error_sptr_t) {
-            str += "E ";
-          },
-          [&str] (object_atom_sptr_t atom) {
-            str += atom->name + " ";
-          },
-          [&str, &object, this] (object_list_sptr_t) {
-            auto head = is_error(car(object)) ? undefined() : car(object); // XXX сомнительно
-            auto tail = is_error(cdr(object)) ? undefined() : cdr(object);
-            str += "LIST ( " + show_n(head) + ") ( " + show_n(tail) + ") ";
-          },
-      }, object);
-      return str;
-    }
-  };
-
-
-
-  struct parser_t {
+  object_t parse(const std::string& str) {
     std::stack<object_t> stack;
-    object_t object = list();
+    object_t ret = list();
+    const char *it = str.c_str();
+    const char *ite = str.c_str() + str.size();
+    while (it != ite) {
+      char c = *it;
+      if (c == '(') {
+        stack.emplace(list());
+      } else if (c == ')') {
+        if (stack.empty()) return error("unexpected ')' on pos " + std::to_string(it - str.c_str()));
 
-    object_t parse(const std::string& str) {
-      const char *it = str.c_str();
-      const char *ite = str.c_str() + str.size();
-      while (it != ite) {
-        char c = *it;
-        if (c == '(') {
-          stack.emplace(list());
-        } else if (c == ')') {
-          if (stack.empty()) return error("unexpected ')' on pos " + std::to_string(it - str.c_str()));
+        auto tmp = stack.top();
+        stack.pop();
 
-          auto tmp = stack.top();
-          stack.pop();
-
-          if (!stack.empty()) {
-            auto object_n = cons(tmp, stack.top());
-            stack.top().swap(object_n);
-          } else {
-            object = cons(tmp, object);
-          }
-        } else if (auto itf = std::find_if(keywords.begin(), keywords.end(),
-              [&](const std::string& keyword) {
-                  return 0 == keyword.compare(0, keyword.size(), it,
-                      0, std::min(keyword.size(), (size_t) (ite - it))); });
-                  itf != keywords.end()) {
-          auto object_atom = std::make_shared<object_atom_t>(*itf);
-          // std::cout << "keyword: '" << object_atom->name << "'" << std::endl;
-          if (stack.empty()) {
-            object = cons(object_atom, object);
-          } else {
-            auto object_n = cons(object_atom, stack.top());
-            stack.top().swap(object_n);
-          }
-          it += itf->size() - 1;
-        } else if (std::isalnum(c)) {
-          auto itf = std::find_if(it, ite, [](char c) { return !isalnum(c); });
-          auto object_atom = std::make_shared<object_atom_t>(std::string(it, itf));
-          // std::cout << "variable: '" << object_atom->name << "'" << std::endl;
-          if (stack.empty()) {
-            object = cons(object_atom, object);
-          } else {
-            auto object_n = cons(object_atom, stack.top());
-            stack.top().swap(object_n);
-          }
-          it += (itf - it) - 1;
-        } else if (c == '"') {
-          auto itf = std::find(it + 1, ite, '"');
-          if (itf == ite) return error("parse: expected '\"' on pos " + std::to_string(it - str.c_str()));
-          auto object_atom = std::make_shared<object_atom_t>(std::string(it, itf + 1));
-          // std::cout << "string: '" << object_atom->name << "'" << std::endl;
-          if (stack.empty()) {
-            object = cons(object_atom, object);
-          } else {
-            auto object_n = cons(object_atom, stack.top());
-            stack.top().swap(object_n);
-          }
-          it += (itf - it);
+        if (!stack.empty()) {
+          auto object_n = cons(tmp, stack.top());
+          stack.top().swap(object_n);
+        } else {
+          ret = cons(tmp, ret);
         }
-        ++it;
+      } else if (auto itf = std::find_if(keywords.begin(), keywords.end(),
+            [&](const std::string& keyword) {
+            return 0 == keyword.compare(0, keyword.size(), it,
+                0, std::min(keyword.size(), (size_t) (ite - it))); });
+          itf != keywords.end()) {
+        auto object_atom = std::make_shared<object_atom_t>(*itf);
+        // std::cout << "keyword: '" << object_atom->name << "'" << std::endl;
+        if (stack.empty()) {
+          ret = cons(object_atom, ret);
+        } else {
+          auto object_n = cons(object_atom, stack.top());
+          stack.top().swap(object_n);
+        }
+        it += itf->size() - 1;
+      } else if (std::isalnum(c)) {
+        auto itf = std::find_if(it, ite, [](char c) { return !isalnum(c); });
+        auto object_atom = std::make_shared<object_atom_t>(std::string(it, itf));
+        // std::cout << "variable: '" << object_atom->name << "'" << std::endl;
+        if (stack.empty()) {
+          ret = cons(object_atom, ret);
+        } else {
+          auto object_n = cons(object_atom, stack.top());
+          stack.top().swap(object_n);
+        }
+        it += (itf - it) - 1;
+      } else if (c == '"') {
+        auto itf = std::find(it + 1, ite, '"');
+        if (itf == ite) return error("parse: expected '\"' on pos " + std::to_string(it - str.c_str()));
+        auto object_atom = std::make_shared<object_atom_t>(std::string(it, itf + 1));
+        // std::cout << "string: '" << object_atom->name << "'" << std::endl;
+        if (stack.empty()) {
+          ret = cons(object_atom, ret);
+        } else {
+          auto object_n = cons(object_atom, stack.top());
+          stack.top().swap(object_n);
+        }
+        it += (itf - it);
       }
-      if (!stack.empty()) return error("expected ')' on pos " + std::to_string(it - str.c_str()));
-      if (is_error(cdr(object))) object = car(object); // Если список один, то дополнительные скобки не нужны.
-      return reverse(object);
+      ++it;
     }
-  };
+    if (!stack.empty()) return error("expected ')' on pos " + std::to_string(it - str.c_str()));
+    if (is_error(cdr(ret))) ret = car(ret); // Если список один, то дополнительные скобки не нужны.
+    return reverse(ret);
+  }
 }
 
 int main() {
@@ -275,14 +268,14 @@ int main() {
     auto a = atom("a");
     assert(is_atom(a));
     assert(shower_t().show(a) == R"LISP(a )LISP");
-    assert(shower_t().show_n(a) == R"LISP(a )LISP");
+    assert(shower_t().show_stucture(a) == R"LISP(a )LISP");
   }
 
   {
     auto l = list();
     assert(is_error(car(l)));
     assert(is_error(cdr(l)));
-    assert(shower_t().show_n(l) == R"LISP(LIST ( U ) ( U ) )LISP");
+    assert(shower_t().show_stucture(l) == R"LISP(LIST ( U ) ( U ) )LISP");
     assert(shower_t().show(l) == R"LISP(( ) )LISP");
   }
 
@@ -290,7 +283,7 @@ int main() {
     auto l = cons(atom("a"), list());
     assert(is_atom(car(l)));
     assert(is_error(cdr(l)));
-    assert(shower_t().show_n(l) == R"LISP(LIST ( a ) ( U ) )LISP");
+    assert(shower_t().show_stucture(l) == R"LISP(LIST ( a ) ( U ) )LISP");
     assert(shower_t().show(l) == R"LISP(( a ) )LISP");
   }
 
@@ -298,7 +291,7 @@ int main() {
     auto l = cons(atom("a"), cons(atom("b"), list()));
     assert(is_atom(car(l)));
     assert(is_list(cdr(l)));
-    assert(shower_t().show_n(l) == R"LISP(LIST ( a ) ( LIST ( b ) ( U ) ) )LISP");
+    assert(shower_t().show_stucture(l) == R"LISP(LIST ( a ) ( LIST ( b ) ( U ) ) )LISP");
     assert(shower_t().show(l) == R"LISP(( a b ) )LISP");
   }
 
@@ -306,7 +299,7 @@ int main() {
     auto l = cons(list(), cons(atom("b"), list()));
     assert(is_list(car(l)));
     assert(is_list(cdr(l)));
-    assert(shower_t().show_n(l) == R"LISP(LIST ( LIST ( U ) ( U ) ) ( LIST ( b ) ( U ) ) )LISP");
+    assert(shower_t().show_stucture(l) == R"LISP(LIST ( LIST ( U ) ( U ) ) ( LIST ( b ) ( U ) ) )LISP");
     assert(shower_t().show(l) == R"LISP(( ( ) b ) )LISP");
   }
 
@@ -330,50 +323,50 @@ int main() {
 
   {
     std::string str = R"LISP((1 2 3) )LISP";
-    auto l = parser_t().parse(str);
-    assert(shower_t().show_n(l) == R"LISP(LIST ( 1 ) ( LIST ( 2 ) ( LIST ( 3 ) ( U ) ) ) )LISP");
+    auto l = parse(str);
+    assert(shower_t().show_stucture(l) == R"LISP(LIST ( 1 ) ( LIST ( 2 ) ( LIST ( 3 ) ( U ) ) ) )LISP");
     assert(shower_t().show(l) == R"LISP(( 1 2 3 ) )LISP");
   }
 
   {
     std::string str = R"LISP(1 2 3 )LISP";
-    auto l = parser_t().parse(str);
-    assert(shower_t().show_n(l) == R"LISP(LIST ( 1 ) ( LIST ( 2 ) ( LIST ( 3 ) ( U ) ) ) )LISP");
+    auto l = parse(str);
+    assert(shower_t().show_stucture(l) == R"LISP(LIST ( 1 ) ( LIST ( 2 ) ( LIST ( 3 ) ( U ) ) ) )LISP");
     assert(shower_t().show(l) == R"LISP(( 1 2 3 ) )LISP");
   }
 
   {
     std::string str = R"LISP(1 2 3 )LISP";
-    auto l = parser_t().parse(str);
-    assert(shower_t().show_n(l) == R"LISP(LIST ( 1 ) ( LIST ( 2 ) ( LIST ( 3 ) ( U ) ) ) )LISP");
+    auto l = parse(str);
+    assert(shower_t().show_stucture(l) == R"LISP(LIST ( 1 ) ( LIST ( 2 ) ( LIST ( 3 ) ( U ) ) ) )LISP");
     assert(shower_t().show(l) == R"LISP(( 1 2 3 ) )LISP");
   }
 
   {
     std::string str = R"LISP(())LISP";
-    auto l = parser_t().parse(str);
-    assert(shower_t().show_n(l) == R"LISP(LIST ( U ) ( U ) )LISP");
+    auto l = parse(str);
+    assert(shower_t().show_stucture(l) == R"LISP(LIST ( U ) ( U ) )LISP");
     assert(shower_t().show(l) == R"LISP(( ) )LISP");
   }
 
   {
     std::string str = R"LISP(( 1 2 3 )LISP";
-    auto l = parser_t().parse(str);
+    auto l = parse(str);
     assert(is_error(l));
   }
 
   {
     std::string str = R"LISP(1 (2 3 )LISP";
-    auto l = parser_t().parse(str);
+    auto l = parse(str);
     assert(is_error(l));
   }
 
   {
     std::string str = R"LISP(2 () )LISP";
     std::cout << "input: '" << str << "'" << std::endl;
-    auto object = parser_t().parse(str);
+    auto object = parse(str);
     std::cout << "output: '" << shower_t().show(object) << "'" << std::endl;
-    std::cout << "output: '" << shower_t().show_n(object) << "'" << std::endl;
+    std::cout << "output: '" << shower_t().show_stucture(object) << "'" << std::endl;
   }
 
   return 0;
