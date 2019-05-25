@@ -1,7 +1,7 @@
 
 #include <iostream>
 #include <memory>
-#include <vector>
+#include <map>
 #include <stack>
 #include <variant>
 #include <optional>
@@ -22,19 +22,64 @@ namespace lisp_interpreter {
 
   struct object_undefined_t;
   struct object_error_t;
-  struct object_atom_t;
+  struct object_atom_keyword_t;
+  struct object_atom_bool_t;
+  struct object_atom_double_t;
+  struct object_atom_string_t;
+  struct object_atom_variable_t;
   struct object_list_t;
 
-  using object_undefined_sptr_t = std::shared_ptr<const object_undefined_t>;
-  using object_error_sptr_t = std::shared_ptr<const object_error_t>;
-  using object_atom_sptr_t = std::shared_ptr<const object_atom_t>;
-  using object_list_sptr_t = std::shared_ptr<const object_list_t>;
+  using object_undefined_sptr_t       = std::shared_ptr<const object_undefined_t>;
+  using object_error_sptr_t           = std::shared_ptr<const object_error_t>;
+  using object_atom_keyword_sptr_t    = std::shared_ptr<const object_atom_keyword_t>;
+  using object_atom_bool_sptr_t       = std::shared_ptr<const object_atom_bool_t>;
+  using object_atom_double_sptr_t     = std::shared_ptr<const object_atom_double_t>;
+  using object_atom_string_sptr_t     = std::shared_ptr<const object_atom_string_t>;
+  using object_atom_variable_sptr_t   = std::shared_ptr<const object_atom_variable_t>;
+  using object_list_sptr_t            = std::shared_ptr<const object_list_t>;
 
   using object_t = std::variant<
     object_undefined_sptr_t,
     object_error_sptr_t,
-    object_atom_sptr_t,
+    object_atom_keyword_sptr_t,
+    object_atom_double_sptr_t,
+    object_atom_string_sptr_t,
+    object_atom_variable_sptr_t,
     object_list_sptr_t>;
+
+  enum class op_t {
+    ADD,
+    SUB,
+    MUL,
+    DIV,
+    MOD,
+    SCONCAT,
+
+    GT,
+    GTE,
+    LT,
+    LTE,
+    EQ,
+    NOEQ,
+
+    DEF,
+    SET,
+    GET,
+    QUOTE,
+    TYPEOF,
+    CONS,
+    CAR,
+    CDR,
+    COND,
+    PRINT,
+    READ,
+    EVAL,
+    EVALIN,
+    LAMBDA,
+    MACRO,
+    MACROEXPAND,
+  };
+
 
   struct object_undefined_t { };
 
@@ -51,19 +96,63 @@ namespace lisp_interpreter {
     object_list_t(object_t head, object_t tail) : head(head), tail(tail) { }
   };
 
-  struct object_atom_t {
-    std::string name;
-
-    object_atom_t(const std::string& name) : name(name) { }
+  struct object_atom_keyword_t {
+    op_t value;
+    object_atom_keyword_t(op_t value) : value(value) { }
   };
 
-  std::vector<std::string> keywords = {
-    "+",
-    "-",
-    "*",
-    "/",
+  struct object_atom_bool_t {
+    bool value;
+    object_atom_bool_t(bool value) : value(value) { }
   };
 
+  struct object_atom_double_t {
+    double value;
+    object_atom_double_t(double value) : value(value) { }
+  };
+
+  struct object_atom_string_t {
+    std::string value;
+    object_atom_string_t(const std::string& value) : value(value) { }
+  };
+
+  struct object_atom_variable_t {
+    std::string value;
+    object_atom_variable_t(const std::string& value) : value(value) { }
+  };
+
+  std::map<std::string, op_t> keywords = {
+    { "+",             op_t::ADD },
+    { "-",             op_t::SUB },
+    { "*",             op_t::MUL },
+    { "/",             op_t::DIV },
+    { "mod",           op_t::MOD },
+    { "%",             op_t::MOD },
+    { "++",            op_t::SCONCAT },
+    { ">",             op_t::GT },
+    { ">=",            op_t::GTE },
+    { "<",             op_t::LT },
+    { "<=",            op_t::LTE },
+    { "=",             op_t::EQ },
+    { "/=",            op_t::NOEQ },
+    { "!=",            op_t::NOEQ },
+    { "def",           op_t::DEF },
+    { "set!",          op_t::SET },
+    { "get",           op_t::GET },
+    { "quote",         op_t::QUOTE },
+    { "typeof",        op_t::TYPEOF },
+    { "cons",          op_t::CONS },
+    { "car",           op_t::CAR },
+    { "cdr",           op_t::CDR },
+    { "cond",          op_t::COND },
+    { "print",         op_t::PRINT },
+    { "read",          op_t::READ },
+    { "eval",          op_t::EVAL },
+    { "eval-in",       op_t::EVALIN },
+    { "lambda",        op_t::LAMBDA },
+    { "macro",         op_t::MACRO },
+    { "macroexpand",   op_t::MACROEXPAND },
+  };
 
 
 
@@ -78,17 +167,29 @@ namespace lisp_interpreter {
     return std::make_shared<object_error_t>(msg);
   }
 
-  object_t atom(const std::string& name) {
-    return std::make_shared<object_atom_t>(name);
+  object_t atom_keyword(op_t value) {
+    return std::make_shared<object_atom_keyword_t>(value);
+  }
+
+  object_t atom_double(double value) {
+    return std::make_shared<object_atom_double_t>(value);
+  }
+
+  object_t atom_string(const std::string& value) {
+    return std::make_shared<object_atom_string_t>(value);
+  }
+
+  object_t atom_variable(const std::string& value) {
+    return std::make_shared<object_atom_variable_t>(value);
   }
 
   object_t list() {
     return std::make_shared<object_list_t>(undefined(), undefined());
   }
 
-  bool is_atom(object_t object) {
+  /*bool is_atom(object_t object) {
     return std::get_if<object_atom_sptr_t>(&object);
-  }
+  }*/
 
   bool is_list(object_t object) {
     return std::get_if<object_list_sptr_t>(&object);
@@ -102,6 +203,14 @@ namespace lisp_interpreter {
     return std::get_if<object_error_sptr_t>(&object);
   }
 
+  bool is_null(object_t object) {
+    if (!is_list(object)) return false;
+    auto list = std::get<object_list_sptr_t>(object);
+    return is_undefined(list->head) && is_undefined(list->tail);
+  }
+
+  // is_null
+
   object_t car(object_t object) {
     if (is_error(object)) return object;
     if (!is_list(object)) return error("car: object is not list");
@@ -114,7 +223,7 @@ namespace lisp_interpreter {
     if (is_error(object)) return object;
     if (!is_list(object)) return error("cdr: expected list");
     auto list = std::get<object_list_sptr_t>(object);
-    if (is_undefined(list->tail)) return error("cdr: object->tail is undefined");
+    if (is_undefined(list->head) && is_undefined(list->tail)) return error("cdr: object->tail is undefined");
     return list->tail;
   }
 
@@ -149,9 +258,9 @@ namespace lisp_interpreter {
 
   std::string show_list(object_t object) { // private
     std::string str;
-    std::visit(overloaded {
-        [&str] (object_atom_sptr_t atom) {
-          str += atom->name + " ";
+    std::visit(overloaded { // TODO
+        [&str] (object_atom_string_sptr_t atom) {
+          str += atom->value + " ";
         },
         [&str, &object] (object_list_sptr_t) {
           auto head = car(object);
@@ -178,13 +287,15 @@ namespace lisp_interpreter {
         [&str] (object_error_sptr_t) {
           str += "E ";
         },
-        [&str] (object_atom_sptr_t atom) {
-          str += atom->name + " ";
+        [&str] (object_atom_string_sptr_t atom) { // TODO
+          str += atom->value + " ";
         },
         [&str, &object] (object_list_sptr_t) {
           auto head = is_error(car(object)) ? undefined() : car(object); // XXX сомнительно
           auto tail = is_error(cdr(object)) ? undefined() : cdr(object);
           str += "LIST ( " + show_stucture(head) + ") ( " + show_stucture(tail) + ") ";
+        },
+        [&str] (auto) {
         },
     }, object);
     return str;
@@ -211,12 +322,8 @@ namespace lisp_interpreter {
         } else {
           ret = cons(tmp, ret);
         }
-      } else if (auto itf = std::find_if(keywords.begin(), keywords.end(),
-            [&](const std::string& keyword) {
-            return 0 == keyword.compare(0, keyword.size(), it,
-                0, std::min(keyword.size(), (size_t) (ite - it))); });
-          itf != keywords.end()) {
-        auto object_atom = std::make_shared<object_atom_t>(*itf);
+      /*} else if (auto itf = keywords.find("+"); itf != keywords.end()) {
+        auto object_atom = std::make_shared<object_atom_keyword_t>(itf->first);
         // std::cout << "keyword: '" << object_atom->name << "'" << std::endl;
         if (stack.empty()) {
           ret = cons(object_atom, ret);
@@ -224,10 +331,19 @@ namespace lisp_interpreter {
           auto object_n = cons(object_atom, stack.top());
           stack.top().swap(object_n);
         }
-        it += itf->size() - 1;
-      } else if (std::isalnum(c)) {
-        auto itf = std::find_if(it, ite, [](char c) { return !isalnum(c); });
-        auto object_atom = std::make_shared<object_atom_t>(std::string(it, itf));
+        it += itf->first.size() - 1;
+      */} else if (std::isalnum(c)) {
+        auto itf = std::find_if(it, ite, [](auto c) { return !isalnum(c); });
+        std::string value = std::string(it, itf);
+        std::string value_lower = value;
+        std::transform(value.begin(), value.end(), value_lower.begin(), ::tolower);
+
+        object_t object_atom;
+        if (auto itk = keywords.find(value_lower); itk != keywords.end()) { // keyword
+          auto object_atom = atom_keyword(itk->second);
+        } else { // variable
+          auto object_atom = atom_variable(value);
+        }
         // std::cout << "variable: '" << object_atom->name << "'" << std::endl;
         if (stack.empty()) {
           ret = cons(object_atom, ret);
@@ -239,7 +355,7 @@ namespace lisp_interpreter {
       } else if (c == '"') {
         auto itf = std::find(it + 1, ite, '"');
         if (itf == ite) return error("parse: expected '\"' on pos " + std::to_string(it - str.c_str()));
-        auto object_atom = std::make_shared<object_atom_t>(std::string(it, itf + 1));
+        auto object_atom = std::make_shared<object_atom_string_t>(std::string(it, itf + 1));
         // std::cout << "string: '" << object_atom->name << "'" << std::endl;
         if (stack.empty()) {
           ret = cons(object_atom, ret);
@@ -255,6 +371,25 @@ namespace lisp_interpreter {
     if (is_error(cdr(ret))) ret = car(ret); // Если список один, то дополнительные скобки не нужны.
     return reverse(ret);
   }
+
+  object_t eval_op(object_t op, object_t acc, object_t tail) {
+    return op;
+  }
+
+  object_t eval(object_t object) {
+    object_t ret = object;
+    std::visit(overloaded {
+        [&ret] (object_list_sptr_t) {
+          auto op = car(ret);
+          auto tail = cdr(ret);
+          ret = eval_op(op, undefined(), tail);
+        },
+        [&ret] (auto) {
+          ;
+        },
+    }, object);
+    return ret;
+  }
 }
 
 int main() {
@@ -265,8 +400,8 @@ int main() {
   // T E S T
 
   {
-    auto a = atom("a");
-    assert(is_atom(a));
+    auto a = atom_string("a");
+    // assert(is_atom(a));
     assert(show(a) == R"LISP(a )LISP");
     assert(show_stucture(a) == R"LISP(a )LISP");
   }
@@ -280,23 +415,23 @@ int main() {
   }
 
   {
-    auto l = cons(atom("a"), list());
-    assert(is_atom(car(l)));
+    auto l = cons(atom_string("a"), list());
+    // assert(is_atom(car(l)));
     assert(is_error(cdr(l)));
     assert(show_stucture(l) == R"LISP(LIST ( a ) ( U ) )LISP");
     assert(show(l) == R"LISP(( a ) )LISP");
   }
 
   {
-    auto l = cons(atom("a"), cons(atom("b"), list()));
-    assert(is_atom(car(l)));
+    auto l = cons(atom_string("a"), cons(atom_string("b"), list()));
+    // assert(is_atom(car(l)));
     assert(is_list(cdr(l)));
     assert(show_stucture(l) == R"LISP(LIST ( a ) ( LIST ( b ) ( U ) ) )LISP");
     assert(show(l) == R"LISP(( a b ) )LISP");
   }
 
   {
-    auto l = cons(list(), cons(atom("b"), list()));
+    auto l = cons(list(), cons(atom_string("b"), list()));
     assert(is_list(car(l)));
     assert(is_list(cdr(l)));
     assert(show_stucture(l) == R"LISP(LIST ( LIST ( U ) ( U ) ) ( LIST ( b ) ( U ) ) )LISP");
@@ -305,16 +440,16 @@ int main() {
 
   {
     auto expr = cons(
-        atom("*"),
+        atom_string("*"),
         cons(
-          atom("2"),
+          atom_string("2"),
           cons(
             cons(
-              atom("+"),
+              atom_string("+"),
               cons(
-                atom("3"),
+                atom_string("3"),
                 cons(
-                  atom("4"),
+                  atom_string("4"),
                   list()))),
             list())));
 
@@ -362,9 +497,9 @@ int main() {
   }
 
   {
-    std::string str = R"LISP(2 () )LISP";
+    std::string str = R"LISP((+ 1 2 3 var "str" (CONS 1 2 3)))LISP";
     std::cout << "input: '" << str << "'" << std::endl;
-    auto object = parse(str);
+    auto object = eval(parse(str));
     std::cout << "output: '" << show(object) << "'" << std::endl;
     std::cout << "output: '" << show_stucture(object) << "'" << std::endl;
   }
