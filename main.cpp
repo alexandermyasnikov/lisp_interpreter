@@ -223,7 +223,7 @@ namespace lisp_interpreter {
     if (is_error(object))
       return {object, object};
     if (!is_list(object)) {
-      auto ret = error("decompose: object '" + (show_struct(object)) + "' is not list");
+      auto ret = error("decompose: unexpected '" + show(object) + "', expected list");
       return {ret, ret};
     }
     auto list = std::get<object_list_sptr_t>(object);
@@ -244,7 +244,7 @@ namespace lisp_interpreter {
     if (is_error(tail))
       return tail;
     if (!is_list(tail) && !is_nil(tail))
-      return error("cons: object '" + (show_struct(tail)) + "' is not list and not nil");
+      return error("cons: unexpected '" + show(tail) + "', expected list or nil");
     assert(show_struct(car(list(head, tail))) == show_struct(head));
     assert(show_struct(cdr(list(head, tail))) == show_struct(tail));
     return list(head, tail);
@@ -411,17 +411,22 @@ namespace lisp_interpreter {
   object_t eval_op(const object_t& object_op, const object_t& tail) {
     object_t ret = nil();
     auto op = as_atom_operator(object_op);
-    if (!op) return error("eval_op: object '" + (show_struct(tail)) + "' is not operator");
+    if (!op) return error("eval_op: unexpected '" + show(op) + "', expected operator");
     switch (*op) {
       case op_t::ADD: {
         double acc = 0; // XXX
         auto t = tail;
         while (!is_nil(t)) {
           auto p = decompose(t);
-          if (auto v = as_atom_int(p.first); v) {
+          auto curr = eval(p.first);
+          if (auto v = as_atom_int(curr); v) {
             acc += *v;
-          } else if (auto v = as_atom_double(p.first); v) {
+          } else if (auto v = as_atom_double(curr); v) {
             acc += *v;
+          } else if (auto v = as_atom_error(curr); v) {
+            return *v;
+          } else {
+            return error("eval_op: unexpected '" + show(curr) + "', expected int or double");
           }
           t = p.second;
         }
@@ -469,8 +474,10 @@ int main() {
     assert(is_error(cdr(l)));
     assert(show(l) == R"LISP(true)LISP");
     assert(show_struct(l) == R"LISP(B:true )LISP");
-    assert(show_struct(car(l)) == R"LISP(E:"decompose: object 'B:true ' is not list" )LISP");
-    assert(show_struct(cdr(l)) == R"LISP(E:"decompose: object 'B:true ' is not list" )LISP");
+    assert(show_struct(car(l)) == R"LISP(E:"decompose: unexpected 'true', expected list" )LISP");
+    assert(show_struct(cdr(l)) == R"LISP(E:"decompose: unexpected 'true', expected list" )LISP");
+    assert(show(car(l)) == R"LISP(E:"decompose: unexpected 'true', expected list")LISP");
+    assert(show(cdr(l)) == R"LISP(E:"decompose: unexpected 'true', expected list")LISP");
   }
 
   {
@@ -480,8 +487,8 @@ int main() {
     assert(is_error(cdr(l)));
     assert(show(l) == R"LISP(())LISP");
     assert(show_struct(l) == R"LISP(nil )LISP");
-    assert(show_struct(car(l)) == R"LISP(E:"decompose: object 'nil ' is not list" )LISP");
-    assert(show_struct(cdr(l)) == R"LISP(E:"decompose: object 'nil ' is not list" )LISP");
+    assert(show(car(l)) == R"LISP(E:"decompose: unexpected '()', expected list")LISP");
+    assert(show(cdr(l)) == R"LISP(E:"decompose: unexpected '()', expected list")LISP");
   }
 
   {
@@ -538,7 +545,7 @@ int main() {
   }
 
   {
-    std::string str = R"LISP((+ 1 2 3.5 4 5))LISP";
+    std::string str = R"LISP((+ 1 2 3 (+ 4 fail) 5))LISP";
     auto l = parse(str);
     l = eval(l);
     std::cout << "input: '" << str << "'" << std::endl;
