@@ -408,36 +408,40 @@ namespace lisp_interpreter {
     return reverse(ret);
   }
 
+  object_t op_add(object_t a, object_t b) {
+    if (is_error(a)) return a;
+    if (is_error(b)) return b;
+    auto ai = as_atom_int(a);
+    auto bi = as_atom_int(b);
+    auto ad = as_atom_double(a);
+    auto bd = as_atom_double(b);
+    if (ai && bi) return atom_int(*ai + *bi);
+    if (ai && bd) return atom_double(*ai + *bd);
+    if (ad && bi) return atom_double(*ad + *bi);
+    if (ad && bd) return atom_double(*ad + *bd);
+    return (ai && ad)
+      ? error("op_add: unexpected '" + show(b) + "', expected int or double")
+      : error("op_add: unexpected '" + show(a) + "', expected int or double");
+  }
+
   object_t eval_op(const object_t& object_op, const object_t& tail) {
     object_t ret = nil();
     auto op = as_atom_operator(object_op);
     if (!op) return error("eval_op: unexpected '" + show(op) + "', expected operator");
-    switch (*op) {
-      case op_t::ADD: {
-        double acc = 0; // XXX
-        auto t = tail;
-        while (!is_nil(t)) {
-          auto p = decompose(t);
-          auto curr = eval(p.first);
-          if (auto v = as_atom_int(curr); v) {
-            acc += *v;
-          } else if (auto v = as_atom_double(curr); v) {
-            acc += *v;
-          } else if (auto v = as_atom_error(curr); v) {
-            return *v;
-          } else {
-            return error("eval_op: unexpected '" + show(curr) + "', expected int or double");
-          }
-          t = p.second;
+    auto t = tail;
+    while (!is_nil(t)) {
+      auto p = decompose(t);
+      auto curr = eval(p.first);
+      switch (*op) {
+        case op_t::ADD: {
+          if (is_nil(ret))
+            ret = atom_int(0);
+          ret = op_add(ret, curr);
+          break;
         }
-        ret = acc;
-
-        break;
+        default: break; // TODO
       }
-      default: {
-        // TODO
-        break;
-      }
+      t = p.second;
     }
     return ret;
   }
@@ -545,7 +549,21 @@ int main() {
   }
 
   {
-    std::string str = R"LISP((+ 1 2 3 (+ 4 fail) 5))LISP";
+    std::string str = R"LISP((+ 1 2 3 (+ 4 0) 5))LISP";
+    auto l = eval(parse(str));
+    assert(show(l) == R"LISP(15)LISP");
+    assert(show_struct(l) == R"LISP(I:15 )LISP");
+  }
+
+  {
+    std::string str = R"LISP((+ 1 2 3 (+ 4.0 0) 5))LISP";
+    auto l = eval(parse(str));
+    assert(show(l) == R"LISP(15.000000)LISP");
+    assert(show_struct(l) == R"LISP(D:15.000000 )LISP");
+  }
+
+  {
+    std::string str = R"LISP((+ 1 2 3 (+ 4.0 0) 5))LISP";
     auto l = parse(str);
     l = eval(l);
     std::cout << "input: '" << str << "'" << std::endl;
