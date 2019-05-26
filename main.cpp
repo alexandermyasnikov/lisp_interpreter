@@ -125,11 +125,13 @@ namespace lisp_interpreter {
   };
 
 
+
   // FD
 
-  std::string show_struct(object_t object);
-  std::string show(object_t object);
+  std::string show_struct(const object_t& object);
+  std::string show(const object_t& object);
   object_t parse(const std::string& str);
+  object_t eval(const object_t& object);
 
 
 
@@ -167,47 +169,81 @@ namespace lisp_interpreter {
     return object_variable_t(value);
   }
 
-  object_t list(object_t head, object_t tail) {
+  object_t list(const object_t& head, const object_t& tail) {
     return std::make_shared<object_list_t>(head, tail);
   }
 
-  bool is_nil(object_t object) {
-    return std::get_if<object_nil_t>(&object);
-  }
-
-  bool is_list(object_t object) {
-    return std::get_if<object_list_sptr_t>(&object);
-  }
-
-  bool is_error(object_t object) {
+  const object_error_t* as_atom_error(const object_t& object) {
     return std::get_if<object_error_t>(&object);
   }
 
-  std::pair<object_t, object_t> pair(object_t object) {
-    if (is_error(object)) {
+  const bool* as_atom_bool(const object_t& object) {
+    return std::get_if<bool>(&object);
+  }
+
+  const int* as_atom_int(const object_t& object) {
+    return std::get_if<int>(&object);
+  }
+
+  const double* as_atom_double(const object_t& object) {
+    return std::get_if<double>(&object);
+  }
+
+  const std::string* as_atom_string(const object_t& object) {
+    return std::get_if<std::string>(&object);
+  }
+
+  const op_t* as_atom_operator(const object_t& object) {
+    return std::get_if<op_t>(&object);
+  }
+
+  const object_variable_t* as_atom_variable(const object_t& object) {
+    return std::get_if<object_variable_t>(&object);
+  }
+
+  const object_list_sptr_t* as_atom_list(const object_t& object) {
+    return std::get_if<object_list_sptr_t>(&object);
+  }
+
+
+  bool is_nil(const object_t& object) {
+    return std::get_if<object_nil_t>(&object);
+  }
+
+  bool is_list(const object_t& object) {
+    return std::get_if<object_list_sptr_t>(&object);
+  }
+
+  bool is_error(const object_t& object) {
+    return std::get_if<object_error_t>(&object);
+  }
+
+
+  std::pair<object_t, object_t> decompose(const object_t& object) {
+    if (is_error(object))
       return {object, object};
-    } else if (!is_list(object)) {
-      auto ret = error("pair: object '" + (show_struct(object)) + "' is not list");
+    if (!is_list(object)) {
+      auto ret = error("decompose: object '" + (show_struct(object)) + "' is not list");
       return {ret, ret};
     }
     auto list = std::get<object_list_sptr_t>(object);
     return {list->head, list->tail};
   }
 
-  object_t car(object_t object) {
-    return pair(object).first;
+  object_t car(const object_t& object) {
+    return decompose(object).first;
   }
 
-  object_t cdr(object_t object) {
-    return pair(object).second;
+  object_t cdr(const object_t& object) {
+    return decompose(object).second;
   }
 
-  object_t cons(object_t head, object_t tail) {
+  object_t cons(const object_t& head, const object_t& tail) {
     if (is_error(head))
       return head;
-    else if (is_error(tail))
+    if (is_error(tail))
       return tail;
-    else if (!is_list(tail) && !is_nil(tail))
+    if (!is_list(tail) && !is_nil(tail))
       return error("cons: object '" + (show_struct(tail)) + "' is not list and not nil");
     assert(show_struct(car(list(head, tail))) == show_struct(head));
     assert(show_struct(cdr(list(head, tail))) == show_struct(tail));
@@ -218,18 +254,19 @@ namespace lisp_interpreter {
 
   // L I B R A R Y
 
-  object_t reverse(object_t object) {
+  object_t reverse(const object_t& object) {
     if (!is_list(object))
       return object;
     auto list_r = nil();
-    while (is_list(object)) {
-      list_r = cons(reverse(car(object)), list_r);
-      object = cdr(object);
+    auto obj = object;
+    while (is_list(obj)) {
+      list_r = cons(reverse(car(obj)), list_r);
+      obj = cdr(obj);
     }
     return list_r;
   }
 
-  std::string show(object_t object) {
+  std::string show(const object_t& object) {
     std::string str;
     std::visit(overloaded {
         [&str] (object_nil_t) {
@@ -257,7 +294,7 @@ namespace lisp_interpreter {
           str += v.name;
         },
         [&str, &object] (object_list_sptr_t) {
-          auto p = pair(object);
+          auto p = decompose(object);
           str += "(";
           auto l = object;
           while (!is_nil(l)) {
@@ -271,7 +308,7 @@ namespace lisp_interpreter {
     return str;
   }
 
-  std::string show_struct(object_t object) {
+  std::string show_struct(const object_t& object) {
     std::string str;
     std::visit(overloaded {
         [&str] (object_nil_t) {
@@ -363,7 +400,6 @@ namespace lisp_interpreter {
           stack.top().swap(object_n);
         }
         it += (itf - it) - 1;
-      } else {
       }
       ++it;
     }
@@ -372,18 +408,45 @@ namespace lisp_interpreter {
     return reverse(ret);
   }
 
-  object_t eval_op(object_t op, object_t acc, object_t tail) {
-    // TODO
-    return op;
+  object_t eval_op(const object_t& object_op, const object_t& tail) {
+    object_t ret = nil();
+    auto op = as_atom_operator(object_op);
+    if (!op) return error("eval_op: object '" + (show_struct(tail)) + "' is not operator");
+    switch (*op) {
+      case op_t::ADD: {
+        double acc = 0; // XXX
+        auto t = tail;
+        while (!is_nil(t)) {
+          auto p = decompose(t);
+          if (auto v = as_atom_int(p.first); v) {
+            acc += *v;
+          } else if (auto v = as_atom_double(p.first); v) {
+            acc += *v;
+          }
+          t = p.second;
+        }
+        ret = acc;
+
+        break;
+      }
+      default: {
+        // TODO
+        break;
+      }
+    }
+    return ret;
   }
 
-  object_t eval(object_t object) { // TODO
+  object_t eval(const object_t& object) { // TODO
+    if (is_error(object)) return object;
     object_t ret = object;
     std::visit(overloaded {
+        [&ret] (object_error_t) { // TODO
+          ;
+        },
         [&ret] (object_list_sptr_t) {
-          // auto op = car(ret);
-          // auto tail = cdr(ret);
-          // ret = eval_op(op, undefined(), tail);
+          auto p = decompose(ret);
+          ret = eval_op(p.first, p.second);
         },
         [&ret] (auto) {
           ;
@@ -406,8 +469,8 @@ int main() {
     assert(is_error(cdr(l)));
     assert(show(l) == R"LISP(true)LISP");
     assert(show_struct(l) == R"LISP(B:true )LISP");
-    assert(show_struct(car(l)) == R"LISP(E:"pair: object 'B:true ' is not list" )LISP");
-    assert(show_struct(cdr(l)) == R"LISP(E:"pair: object 'B:true ' is not list" )LISP");
+    assert(show_struct(car(l)) == R"LISP(E:"decompose: object 'B:true ' is not list" )LISP");
+    assert(show_struct(cdr(l)) == R"LISP(E:"decompose: object 'B:true ' is not list" )LISP");
   }
 
   {
@@ -417,8 +480,8 @@ int main() {
     assert(is_error(cdr(l)));
     assert(show(l) == R"LISP(())LISP");
     assert(show_struct(l) == R"LISP(nil )LISP");
-    assert(show_struct(car(l)) == R"LISP(E:"pair: object 'nil ' is not list" )LISP");
-    assert(show_struct(cdr(l)) == R"LISP(E:"pair: object 'nil ' is not list" )LISP");
+    assert(show_struct(car(l)) == R"LISP(E:"decompose: object 'nil ' is not list" )LISP");
+    assert(show_struct(cdr(l)) == R"LISP(E:"decompose: object 'nil ' is not list" )LISP");
   }
 
   {
@@ -475,8 +538,9 @@ int main() {
   }
 
   {
-    std::string str = R"LISP(  ab)LISP";
+    std::string str = R"LISP((+ 1 2 3.5 4 5))LISP";
     auto l = parse(str);
+    l = eval(l);
     std::cout << "input: '" << str << "'" << std::endl;
     std::cout << "output: '" << show(l) << "'" << std::endl;
     std::cout << "output: '" << show_struct(l) << "'" << std::endl;
