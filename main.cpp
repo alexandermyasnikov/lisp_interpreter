@@ -419,7 +419,7 @@ namespace lisp_interpreter {
     if (ai && bd) return atom_double(*ai + *bd);
     if (ad && bi) return atom_double(*ad + *bi);
     if (ad && bd) return atom_double(*ad + *bd);
-    return (ai && ad)
+    return (ai || ad)
       ? error("op_add: unexpected '" + show(b) + "', expected int or double")
       : error("op_add: unexpected '" + show(a) + "', expected int or double");
   }
