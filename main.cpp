@@ -7,7 +7,7 @@
 #include <optional>
 #include <algorithm>
 
-#define PR        std::cout << __FUNCTION__ << '\t' << __LINE__ << std::endl
+#define PR        std::cout << __PRETTY_FUNCTION__ << '\t' << __LINE__ << std::endl
 #define PRM(msg)  std::cout << __FUNCTION__ << '\t' << __LINE__ << '\t' << msg << std::endl
 #define assert(x) if (!(x)) PRM("ASSERT " #x)
 
@@ -266,6 +266,42 @@ namespace lisp_interpreter {
     return list_r;
   }
 
+  std::string show_operator(op_t op) {
+    switch (op) {
+      case op_t::ADD: return "+";
+      case op_t::SUB: return "-";
+      case op_t::MUL: return "*";
+      case op_t::DIV: return "/";
+      case op_t::MOD: return "%";
+      case op_t::SCONCAT: return "++";
+      case op_t::GT: return ">";
+      case op_t::GTE: return ">=";
+      case op_t::LT: return "<";
+      case op_t::LTE: return "<=";
+      case op_t::EQ: return "=";
+      case op_t::NOEQ: return "!=";
+      /*
+    DEF,
+    SET,
+    GET,
+    QUOTE,
+    TYPEOF,
+    CONS,
+    CAR,
+    CDR,
+    COND,
+    PRINT,
+    READ,
+    EVAL,
+    EVALIN,
+    LAMBDA,
+    MACRO,
+    MACROEXPAND,
+    */
+      default: return "O:U";
+    }
+  }
+
   std::string show(const object_t& object) {
     std::string str;
     std::visit(overloaded {
@@ -288,7 +324,7 @@ namespace lisp_interpreter {
           str += "\"" + v + "\"";
         },
         [&str] (op_t v) {
-          str += std::to_string(static_cast<int>(v)); // TODO
+          str += show_operator(v);
         },
         [&str] (object_variable_t v) {
           str += v.name;
@@ -330,7 +366,7 @@ namespace lisp_interpreter {
           str += "S:\"" + v + "\" ";
         },
         [&str] (op_t v) {
-          str += "O:" + std::to_string(static_cast<int>(v)) + " "; // TODO
+          str += "O:" + show_operator(v) + " ";
         },
         [&str] (object_variable_t v) {
           str += "V:" + v.name + " ";
@@ -380,17 +416,17 @@ namespace lisp_interpreter {
         std::string value_lower = value;
         std::transform(value.begin(), value.end(), value_lower.begin(), ::tolower);
         object_t object_atom;
-        if (auto itk = keywords.find(value_lower); itk != keywords.end()) { // operator
+        if (auto itk = keywords.find(value_lower); itk != keywords.end()) {
           object_atom = atom_operator(itk->second);
-        } else if (value_lower == "true") {                                 // bool true
+        } else if (value_lower == "true") {
           object_atom = atom_bool(true);
-        } else if (value_lower == "false") {                                // bool false
+        } else if (value_lower == "false") {
           object_atom = atom_bool(false);
-        } else if (std::all_of(value.begin(), value.end(), isdigit)) {      // int
+        } else if ((std::isdigit(c) || c == '+' || c == '-') && value.find('.') == std::string::npos) {
           object_atom = atom_int(stoi(value));
-        } else if (value.find('.') != std::string::npos) {                  // double
+        } else if (std::isdigit(c) || c == '+' || c == '-') {
           object_atom = atom_double(stod(value));
-        } else {                                                            // variable
+        } else {
           object_atom = atom_variable(value);
         }
         if (stack.empty()) {
@@ -408,20 +444,40 @@ namespace lisp_interpreter {
     return reverse(ret);
   }
 
-  object_t op_add(object_t a, object_t b) {
+  object_t op_arithmetic(object_t a, object_t b, auto f) {
     if (is_error(a)) return a;
     if (is_error(b)) return b;
     auto ai = as_atom_int(a);
     auto bi = as_atom_int(b);
     auto ad = as_atom_double(a);
     auto bd = as_atom_double(b);
-    if (ai && bi) return atom_int(*ai + *bi);
-    if (ai && bd) return atom_double(*ai + *bd);
-    if (ad && bi) return atom_double(*ad + *bi);
-    if (ad && bd) return atom_double(*ad + *bd);
+    if (ai && bi) return f(*ai, *bi);
+    if (ai && bd) return f(*ai, *bd);
+    if (ad && bi) return f(*ad, *bi);
+    if (ad && bd) return f(*ad, *bd);
     return (ai || ad)
       ? error("op_add: unexpected '" + show(b) + "', expected int or double")
       : error("op_add: unexpected '" + show(a) + "', expected int or double");
+  }
+
+  object_t op_int(object_t a, object_t b, auto f) {
+    if (is_error(a)) return a;
+    if (is_error(b)) return b;
+    auto ai = as_atom_int(a);
+    auto bi = as_atom_int(b);
+    if (!ai) return error("op_int: unexpected '" + show(a) + "', expected int");
+    if (!bi) return error("op_int: unexpected '" + show(b) + "', expected int");
+    return f(*ai, *bi);
+  }
+
+  object_t op_string(object_t a, object_t b, auto f) {
+    if (is_error(a)) return a;
+    if (is_error(b)) return b;
+    auto ai = as_atom_string(a);
+    auto bi = as_atom_string(b);
+    if (!ai) return error("op_int: unexpected '" + show(a) + "', expected string");
+    if (!bi) return error("op_int: unexpected '" + show(b) + "', expected string");
+    return f(*ai, *bi);
   }
 
   object_t eval_op(const object_t& object_op, const object_t& tail) {
@@ -434,9 +490,39 @@ namespace lisp_interpreter {
       auto curr = eval(p.first);
       switch (*op) {
         case op_t::ADD: {
-          if (is_nil(ret))
-            ret = atom_int(0);
-          ret = op_add(ret, curr);
+          ret = is_nil(ret)
+            ? (is_nil(curr) ? error("unexpected nil, expected operand") : curr)
+            : op_arithmetic(ret, curr, [](auto a, auto b) -> object_t { return a + b; });
+          break;
+        }
+        case op_t::SUB: {
+          ret = is_nil(ret)
+            ? (is_nil(curr) ? error("unexpected nil, expected operand") : curr)
+            : op_arithmetic(ret, curr, [](auto a, auto b) -> object_t { return a - b; });
+          break;
+        }
+        case op_t::MUL: {
+          ret = is_nil(ret)
+            ? (is_nil(curr) ? error("unexpected nil, expected operand") : curr)
+            : op_arithmetic(ret, curr, [](auto a, auto b) -> object_t { return a * b; });
+          break;
+        }
+        case op_t::DIV: {
+          ret = is_nil(ret)
+            ? (is_nil(curr) ? error("unexpected nil, expected operand") : curr)
+            : op_arithmetic(ret, curr, [](auto a, auto b) -> object_t { return b != 0 ? a / b : error("division by zero"); });
+          break;
+        }
+        case op_t::MOD: {
+          ret = is_nil(ret)
+            ? (is_nil(curr) ? error("unexpected nil, expected operand") : curr)
+            : op_int(ret, curr, [](auto a, auto b) -> object_t { return a % b; });
+          break;
+        }
+        case op_t::SCONCAT: {
+          ret = is_nil(ret)
+            ? (is_nil(curr) ? error("unexpected nil, expected operand") : curr)
+            : op_string(ret, curr, [](auto a, auto b) -> object_t { return a + b; });
           break;
         }
         default: break; // TODO
@@ -563,7 +649,37 @@ int main() {
   }
 
   {
-    std::string str = R"LISP((+ 1 2 3 (+ 4.0 0) 5))LISP";
+    std::string str = R"LISP((- 100 1 2 (- 4) (- -3)))LISP";
+    auto l = eval(parse(str));
+    assert(show(l) == R"LISP(96)LISP");
+    assert(show_struct(l) == R"LISP(I:96 )LISP");
+  }
+
+  {
+    std::string str = R"LISP((/ 100 2 1 5))LISP";
+    auto l = eval(parse(str));
+    assert(show(l) == R"LISP(10)LISP");
+    assert(show_struct(l) == R"LISP(I:10 )LISP");
+  }
+
+  {
+    std::string str = R"LISP((% 100 3 3))LISP";
+    auto l = eval(parse(str));
+    assert(show(l) == R"LISP(1)LISP");
+    assert(show_struct(l) == R"LISP(I:1 )LISP");
+  }
+
+  {
+    std::string str = R"LISP((++ "a" "b" "tmp"))LISP";
+    auto l = eval(parse(str));
+    assert(show(l) == R"LISP("abtmp")LISP");
+    assert(show_struct(l) == R"LISP(S:"abtmp" )LISP");
+    std::cout << "output: '" << show(l) << "'" << std::endl;
+    std::cout << "output: '" << show_struct(l) << "'" << std::endl;
+  }
+
+  {
+    std::string str = R"LISP((+ 1 2 3 (+ 4 0) 5))LISP";
     auto l = parse(str);
     l = eval(l);
     std::cout << "input: '" << str << "'" << std::endl;
