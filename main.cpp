@@ -7,7 +7,7 @@
 #include <algorithm>
 
 #define PR        std::cout << __PRETTY_FUNCTION__ << '\t' << __LINE__ << std::endl
-#define PRM(msg)  std::cout << __FUNCTION__ << '\t' << __LINE__ << '\t' << msg << std::endl
+#define PRM(msg)  std::cout << __FUNCTION__ << ':' << __LINE__ << '\t' << msg << std::endl
 #define assert(x) if (!(x)) PRM("ASSERT " #x)
 
 
@@ -253,13 +253,13 @@ namespace lisp_interpreter {
 
   // L I B R A R Y
 
-  object_t reverse(const object_t& object) {
+  object_t reverse(const object_t& object, bool recursive = true) {
     if (!is_list(object))
       return object;
     auto list_r = nil();
     auto obj = object;
     while (is_list(obj)) {
-      list_r = cons(reverse(car(obj)), list_r);
+      list_r = cons(recursive ? reverse(car(obj)) : car(obj), list_r);
       obj = cdr(obj);
     }
     return list_r;
@@ -279,24 +279,22 @@ namespace lisp_interpreter {
       case op_t::LTE:          return "<=";
       case op_t::EQ:           return "==";
       case op_t::NOEQ:         return "!=";
-      /*
-    DEF,
-    SET,
-    GET,
-    QUOTE,
-    TYPEOF,
-    CONS,
-    CAR,
-    CDR,
-    COND,
-    PRINT,
-    READ,
-    EVAL,
-    EVALIN,
-    LAMBDA,
-    MACRO,
-    MACROEXPAND,
-    */
+      case op_t::DEF:          return "def";
+      case op_t::SET:          return "set";
+      case op_t::GET:          return "get";
+      case op_t::QUOTE:        return "quote";
+      case op_t::TYPEOF:       return "typeof";
+      case op_t::CONS:         return "cons";
+      case op_t::CAR:          return "car";
+      case op_t::CDR:          return "cdr";
+      case op_t::COND:         return "cond";
+      case op_t::PRINT:        return "print";
+      case op_t::READ:         return "read";
+      case op_t::EVAL:         return "eval";
+      case op_t::EVALIN:       return "evalin";
+      case op_t::LAMBDA:       return "lambda";
+      case op_t::MACRO:        return "macro";
+      case op_t::MACROEXPAND:  return "macroexpand";
       default: return "O:U";
     }
   }
@@ -560,10 +558,53 @@ namespace lisp_interpreter {
           prev = curr;
           break;
         }
+        case op_t::QUOTE: {
+          return tail;
+          break;
+        }
+        case op_t::TYPEOF: {
+          std::string type;
+          std::visit(overloaded {
+              [&type] (object_nil_t)         { type = "nil"; },
+              [&type] (object_error_t)       { type = "error"; },
+              [&type] (bool)                 { type = "bool"; },
+              [&type] (int)                  { type = "int"; },
+              [&type] (double)               { type = "double"; },
+              [&type] (const std::string&)   { type = "string"; },
+              [&type] (op_t)                 { type = "operator"; },
+              [&type] (object_variable_t)    { type = "variable"; },
+              [&type] (object_list_sptr_t)   { type = "list"; },
+          }, curr);
+          return atom_string(type);
+        }
+        case op_t::CONS: {
+          ret = cons(curr, ret);
+          break;
+        }
+        case op_t::CAR: {
+          return car(curr);
+          break;
+        }
+        case op_t::CDR: {
+          return cdr(curr);
+          break;
+        }
+        // case op_t::COND: { }
+        case op_t::PRINT: {
+          std::cout << show(curr) << std::endl;
+          break;
+        }
+        // case op_t::READ: { }
+        // case op_t::EVAL: { }
+        // case op_t::EVALIN { }
+        // case op_t::LAMBDA: { }
+        // case op_t::MACRO: { }
+        // case op_t::MACROEXPAND: { }
         default: return error("unexpected '" + show(object_op) + "'operator");
       }
       t = p.second;
     }
+    if (*op == op_t::CONS) ret = reverse(ret, false);
     return ret;
   }
 
@@ -701,7 +742,16 @@ int main() {
   }
 
   {
-    std::cout << "output: '" << show(show(eval(parse(R"LISP((/ 10 6.0))LISP")))) << "'" << std::endl;
+    assert(show(eval(parse(R"LISP((quote (+ 1 2) 3 4))LISP"))) == R"LISP(((+ 1 2) 3 4))LISP");
+    assert(show(eval(parse(R"LISP((typeof (+ 1 2)))LISP"))) == R"LISP("int")LISP");
+    assert(show(eval(parse(R"LISP((typeof (quote (+ 1 2))))LISP"))) == R"LISP("list")LISP");
+    assert(show(eval(parse(R"LISP((cons 0 1 (+ 1 1) (quote 3 4)))LISP"))) == R"LISP((0 1 2 (3 4)))LISP");
+    assert(show(eval(parse(R"LISP(car (cons 0 1 (+ 1 1) (quote 3 4)))LISP"))) == R"LISP(0)LISP");
+    assert(show(eval(parse(R"LISP(cdr (cons 0 1 (+ 1 1) (quote 3 4)))LISP"))) == R"LISP((1 2 (3 4)))LISP");
+  }
+
+  {
+    std::cout << "output: '" << show(eval(parse(R"LISP(cdr (cons 0 1 (+ 1 1) (quote 3 4)))LISP"))) << "'" << std::endl;
   }
 
   return 0;
