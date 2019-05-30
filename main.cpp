@@ -493,7 +493,7 @@ namespace lisp_interpreter {
     object_t ret = nil();
     object_t prev = nil();
     auto op = as_atom_operator(object_op);
-    if (!op) return error("eval_op: unexpected '" + show(op) + "', expected operator");
+    if (!op) return error("eval_op: unexpected '" + show(object_op) + "', expected operator");
     if (is_nil(tail)) return error("unexpected nil, expected operand after '" + show(object_op) + "'");
     auto t = tail;
     while (!is_nil(t)) {
@@ -670,45 +670,14 @@ int main() {
   }
 
   {
-    std::string str = R"LISP((+ 1 2 3 (+ 4 0) 5))LISP";
-    auto l = eval(parse(str));
-    assert(show(l) == R"LISP(15)LISP");
-    assert(show_struct(l) == R"LISP(I:15 )LISP");
-  }
-
-  {
-    std::string str = R"LISP((+ 1 2 3 (+ 4.0 0) 5))LISP";
-    auto l = eval(parse(str));
-    assert(show(l) == R"LISP(15.000000)LISP");
-    assert(show_struct(l) == R"LISP(D:15.000000 )LISP");
-  }
-
-  {
-    std::string str = R"LISP((- 100 1 2 (- 4) (- -3)))LISP";
-    auto l = eval(parse(str));
-    assert(show(l) == R"LISP(96)LISP");
-    assert(show_struct(l) == R"LISP(I:96 )LISP");
-  }
-
-  {
-    std::string str = R"LISP((/ 100 2 1 5))LISP";
-    auto l = eval(parse(str));
-    assert(show(l) == R"LISP(10)LISP");
-    assert(show_struct(l) == R"LISP(I:10 )LISP");
-  }
-
-  {
-    std::string str = R"LISP((% 100 3 3))LISP";
-    auto l = eval(parse(str));
-    assert(show(l) == R"LISP(1)LISP");
-    assert(show_struct(l) == R"LISP(I:1 )LISP");
-  }
-
-  {
-    std::string str = R"LISP((++ "a" "b" "tmp"))LISP";
-    auto l = eval(parse(str));
-    assert(show(l) == R"LISP("abtmp")LISP");
-    assert(show_struct(l) == R"LISP(S:"abtmp" )LISP");
+    assert(show(eval(parse(R"LISP((+ 10 1 2 3))LISP"))) == R"LISP(16)LISP");
+    assert(show(eval(parse(R"LISP((- 10 1 2 3))LISP"))) == R"LISP(4)LISP");
+    assert(show(eval(parse(R"LISP((- 10 1.0 2 3))LISP"))) == R"LISP(4.000000)LISP");
+    assert(show(eval(parse(R"LISP((* 10 1 2 3))LISP"))) == R"LISP(60)LISP");
+    assert(show(eval(parse(R"LISP((/ 10 1 2 3))LISP"))) == R"LISP(1)LISP");
+    assert(show(eval(parse(R"LISP((/ 10.0 1 2 3))LISP"))) == R"LISP(1.666667)LISP");
+    assert(show(eval(parse(R"LISP((% 100 3 3))LISP"))) == R"LISP(1)LISP");
+    assert(show(eval(parse(R"LISP((++ "a" "b" "c"))LISP"))) == R"LISP("abc")LISP");
   }
 
   {
@@ -732,7 +701,7 @@ int main() {
   }
 
   {
-    std::cout << "output: '" << show(show(eval(parse(R"LISP((> 2 1))LISP")))) << "'" << std::endl;
+    std::cout << "output: '" << show(show(eval(parse(R"LISP((/ 10 6.0))LISP")))) << "'" << std::endl;
   }
 
   return 0;
