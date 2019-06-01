@@ -146,7 +146,7 @@ namespace lisp_interpreter {
   std::string show_struct(const object_t& object);
   std::string show(const object_t& object);
   object_t parse(const std::string& str);
-  object_t eval(const object_t& object);
+  object_t eval(const object_t& object, envs_t env);
 
 
 
@@ -236,7 +236,7 @@ namespace lisp_interpreter {
   object_t env_t::setvar(const key_t& key, const val_t& val) {
     auto env = shared_from_this();
     while (env) {
-      auto fr = env->frame;
+      auto &fr = env->frame;
       auto it = fr.find(key);
       if (it != fr.end()) {
         it->second = val;
@@ -250,7 +250,7 @@ namespace lisp_interpreter {
   object_t env_t::getvar(const key_t& key) {
     auto env = shared_from_this();
     while (env) {
-      auto fr = env->frame;
+      auto &fr = env->frame;
       auto it = fr.find(key);
       if (it != fr.end()) {
         return it->second;
@@ -534,13 +534,13 @@ namespace lisp_interpreter {
     return f(*ab, *bb);
   }
 
-  object_t eval_op(const object_t& object_op, const object_t& tail) {
+  object_t eval_op(const object_t& object_op, const object_t& tail, envs_t env) {
     object_t ret = nil();
     object_t prev = nil();
 
     if (is_list(object_op)) {
-      auto res = eval(object_op);
-      return !is_nil(tail) ? eval(tail) : res;
+      auto res = eval(object_op, env);
+      return !is_nil(tail) ? eval(tail, env) : res;
     }
 
     auto op = as_atom_operator(object_op);
@@ -549,7 +549,7 @@ namespace lisp_interpreter {
     auto t = tail;
     while (!is_nil(t)) {
       auto p = decompose(t);
-      auto curr = eval(p.first);
+      auto curr = eval(p.first, env);
       switch (*op) {
         case op_t::ADD: {
           ret = is_nil(ret)
@@ -612,24 +612,20 @@ namespace lisp_interpreter {
           break;
         }
         case op_t::DEF: {
-          if (is_nil(prev)) { prev = curr; break; }
+          if (is_nil(prev)) { prev = p.first; break; } // Не вычисляем
           auto var = as_atom_variable(prev);
           if (!var) return error("eval_op: unexpected '" + show(prev) + "', expected variable");
-          auto env = std::make_shared<env_t>(); // TODO
           return env->defvar(var->name, curr);
         }
         case op_t::SET: {
-          if (is_nil(prev)) { prev = curr; break; }
+          if (is_nil(prev)) { prev = p.first; break; }
           auto var = as_atom_variable(prev);
           if (!var) return error("eval_op: unexpected '" + show(prev) + "', expected variable");
-          auto env = std::make_shared<env_t>(); // TODO
-          return env->setvar(var->name, curr);
+          auto tmp = env->setvar(var->name, curr);
+          return tmp;
         }
         case op_t::GET: {
-          auto var = as_atom_variable(curr);
-          if (!var) return error("eval_op: unexpected '" + show(prev) + "', expected variable");
-          auto env = std::make_shared<env_t>(); // TODO
-          return env->getvar(var->name);
+          return curr; // Уже вычислено
         }
         case op_t::QUOTE: {
           return tail;
@@ -681,16 +677,17 @@ namespace lisp_interpreter {
     return ret;
   }
 
-  object_t eval(const object_t& object) { // TODO
+  object_t eval(const object_t& object, envs_t env) { // TODO
     if (is_error(object)) return object;
     object_t ret = object;
     std::visit(overloaded {
-        [&ret] (object_error_t) { // TODO
-          ;
-        },
-        [&ret] (object_list_sptr_t) {
+        [&ret, env] (object_list_sptr_t) {
           auto p = decompose(ret);
-          ret = eval_op(p.first, p.second);
+          ret = eval_op(p.first, p.second, env);
+        },
+        [&ret, env] (const object_variable_t& var) {
+          auto res = env->getvar(var.name);
+          if (!is_error(res)) ret = res;   // Знчение может быть задано позже
         },
         [&ret] (auto) {
           ;
@@ -707,7 +704,7 @@ int main() {
 
   // T E S T
 
-  auto env = std::make_shared<env_t>(); // TODO
+  auto env = std::make_shared<env_t>();
 
   {
     auto l = atom_bool(true);
@@ -786,48 +783,54 @@ int main() {
   }
 
   {
-    assert(show(eval(parse(R"LISP((+ 10 1 2 3))LISP"))) == R"LISP(16)LISP");
-    assert(show(eval(parse(R"LISP((- 10 1 2 3))LISP"))) == R"LISP(4)LISP");
-    assert(show(eval(parse(R"LISP((- 10 1.0 2 3))LISP"))) == R"LISP(4.000000)LISP");
-    assert(show(eval(parse(R"LISP((* 10 1 2 3))LISP"))) == R"LISP(60)LISP");
-    assert(show(eval(parse(R"LISP((/ 10 1 2 3))LISP"))) == R"LISP(1)LISP");
-    assert(show(eval(parse(R"LISP((/ 10.0 1 2 3))LISP"))) == R"LISP(1.666667)LISP");
-    assert(show(eval(parse(R"LISP((% 100 3 3))LISP"))) == R"LISP(1)LISP");
-    assert(show(eval(parse(R"LISP((++ "a" "b" "c"))LISP"))) == R"LISP("abc")LISP");
+    assert(show(eval(parse(R"LISP((+ 10 1 2 3))LISP"), env)) == R"LISP(16)LISP");
+    assert(show(eval(parse(R"LISP((- 10 1 2 3))LISP"), env)) == R"LISP(4)LISP");
+    assert(show(eval(parse(R"LISP((- 10 1.0 2 3))LISP"), env)) == R"LISP(4.000000)LISP");
+    assert(show(eval(parse(R"LISP((* 10 1 2 3))LISP"), env)) == R"LISP(60)LISP");
+    assert(show(eval(parse(R"LISP((/ 10 1 2 3))LISP"), env)) == R"LISP(1)LISP");
+    assert(show(eval(parse(R"LISP((/ 10.0 1 2 3))LISP"), env)) == R"LISP(1.666667)LISP");
+    assert(show(eval(parse(R"LISP((% 100 3 3))LISP"), env)) == R"LISP(1)LISP");
+    assert(show(eval(parse(R"LISP((++ "a" "b" "c"))LISP"), env)) == R"LISP("abc")LISP");
   }
 
   {
-    assert(show(eval(parse(R"LISP((> 2 1))LISP"))) == R"LISP(true)LISP");
-    assert(show(eval(parse(R"LISP((> 2 1 0))LISP"))) == R"LISP(true)LISP");
-    assert(show(eval(parse(R"LISP((> 2 1 0 5))LISP"))) == R"LISP(false)LISP");
-    assert(show(eval(parse(R"LISP((> 2))LISP"))) == R"LISP(true)LISP");
-    assert(show(eval(parse(R"LISP((> 2.0 5))LISP"))) == R"LISP(false)LISP");
-    assert(show(eval(parse(R"LISP((> 9 8 7 -2 -3 (+ 1 -9)))LISP"))) == R"LISP(true)LISP");
-    assert(show(eval(parse(R"LISP((> 9 8 7 -3 -3 (+ 1 -9)))LISP"))) == R"LISP(false)LISP");
-    assert(show(eval(parse(R"LISP((>= 9 8 7 -3 -3 (+ 1 -9)))LISP"))) == R"LISP(true)LISP");
-    assert(show(eval(parse(R"LISP((>= 2.0 2))LISP"))) == R"LISP(true)LISP");
-    assert(show(eval(parse(R"LISP((>= 2 2.0))LISP"))) == R"LISP(true)LISP");
-    assert(show(eval(parse(R"LISP((< 1 2 6))LISP"))) == R"LISP(true)LISP");
-    assert(show(eval(parse(R"LISP((< 1 2 6 6))LISP"))) == R"LISP(false)LISP");
-    assert(show(eval(parse(R"LISP((<= 1 2 6 6))LISP"))) == R"LISP(true)LISP");
-    assert(show(eval(parse(R"LISP((== (+ 1 2) 3 (- 10 7) 3.))LISP"))) == R"LISP(true)LISP");
-    assert(show(eval(parse(R"LISP((== (+ 1 2) 3 (- 10 7) 3. 1))LISP"))) == R"LISP(false)LISP");
-    assert(show(eval(parse(R"LISP((!= 1 2 6))LISP"))) == R"LISP(true)LISP");
-    assert(show(eval(parse(R"LISP((!= 1 2 2))LISP"))) == R"LISP(false)LISP");
+    assert(show(eval(parse(R"LISP((> 2 1))LISP"), env)) == R"LISP(true)LISP");
+    assert(show(eval(parse(R"LISP((> 2 1 0))LISP"), env)) == R"LISP(true)LISP");
+    assert(show(eval(parse(R"LISP((> 2 1 0 5))LISP"), env)) == R"LISP(false)LISP");
+    assert(show(eval(parse(R"LISP((> 2))LISP"), env)) == R"LISP(true)LISP");
+    assert(show(eval(parse(R"LISP((> 2.0 5))LISP"), env)) == R"LISP(false)LISP");
+    assert(show(eval(parse(R"LISP((> 9 8 7 -2 -3 (+ 1 -9)))LISP"), env)) == R"LISP(true)LISP");
+    assert(show(eval(parse(R"LISP((> 9 8 7 -3 -3 (+ 1 -9)))LISP"), env)) == R"LISP(false)LISP");
+    assert(show(eval(parse(R"LISP((>= 9 8 7 -3 -3 (+ 1 -9)))LISP"), env)) == R"LISP(true)LISP");
+    assert(show(eval(parse(R"LISP((>= 2.0 2))LISP"), env)) == R"LISP(true)LISP");
+    assert(show(eval(parse(R"LISP((>= 2 2.0))LISP"), env)) == R"LISP(true)LISP");
+    assert(show(eval(parse(R"LISP((< 1 2 6))LISP"), env)) == R"LISP(true)LISP");
+    assert(show(eval(parse(R"LISP((< 1 2 6 6))LISP"), env)) == R"LISP(false)LISP");
+    assert(show(eval(parse(R"LISP((<= 1 2 6 6))LISP"), env)) == R"LISP(true)LISP");
+    assert(show(eval(parse(R"LISP((== (+ 1 2) 3 (- 10 7) 3.))LISP"), env)) == R"LISP(true)LISP");
+    assert(show(eval(parse(R"LISP((== (+ 1 2) 3 (- 10 7) 3. 1))LISP"), env)) == R"LISP(false)LISP");
+    assert(show(eval(parse(R"LISP((!= 1 2 6))LISP"), env)) == R"LISP(true)LISP");
+    assert(show(eval(parse(R"LISP((!= 1 2 2))LISP"), env)) == R"LISP(false)LISP");
   }
 
   {
-    assert(show(eval(parse(R"LISP((quote (+ 1 2) 3 4))LISP"))) == R"LISP(((+ 1 2) 3 4))LISP");
-    assert(show(eval(parse(R"LISP((typeof (+ 1 2)))LISP"))) == R"LISP("int")LISP");
-    assert(show(eval(parse(R"LISP((typeof (quote (+ 1 2))))LISP"))) == R"LISP("list")LISP");
-    assert(show(eval(parse(R"LISP((cons 0 1 (+ 1 1) (quote 3 4)))LISP"))) == R"LISP((0 1 2 (3 4)))LISP");
-    assert(show(eval(parse(R"LISP(car (cons 0 1 (+ 1 1) (quote 3 4)))LISP"))) == R"LISP(0)LISP");
-    assert(show(eval(parse(R"LISP(cdr (cons 0 1 (+ 1 1) (quote 3 4)))LISP"))) == R"LISP((1 2 (3 4)))LISP");
-    assert(show(eval(parse(R"LISP((+ 1 2)(* 10 2)(+ 5 2))LISP"))) == R"LISP(7)LISP");
+    assert(show(eval(parse(R"LISP((quote (+ 1 2) 3 4))LISP"), env)) == R"LISP(((+ 1 2) 3 4))LISP");
+    assert(show(eval(parse(R"LISP((typeof (+ 1 2)))LISP"), env)) == R"LISP("int")LISP");
+    assert(show(eval(parse(R"LISP((typeof (quote (+ 1 2))))LISP"), env)) == R"LISP("list")LISP");
+    assert(show(eval(parse(R"LISP((cons 0 1 (+ 1 1) (quote 3 4)))LISP"), env)) == R"LISP((0 1 2 (3 4)))LISP");
+    assert(show(eval(parse(R"LISP(car (cons 0 1 (+ 1 1) (quote 3 4)))LISP"), env)) == R"LISP(0)LISP");
+    assert(show(eval(parse(R"LISP(cdr (cons 0 1 (+ 1 1) (quote 3 4)))LISP"), env)) == R"LISP((1 2 (3 4)))LISP");
+    assert(show(eval(parse(R"LISP((+ 1 2)(* 10 2)(+ 5 2))LISP"), env)) == R"LISP(7)LISP");
   }
 
   {
-    std::cout << "output: '" << show(eval(parse(R"LISP((def a (quote 1 2 3)) (get a))LISP"))) << "'" << std::endl;
+    assert(show(eval(parse(R"LISP((def a 1) (+ a 1))LISP"), env)) == R"LISP(2)LISP");
+    assert(show(eval(parse(R"LISP((def a (quote 1 2 3)) (get a))LISP"), env)) == R"LISP((1 2 3))LISP");
+    assert(show(eval(parse(R"LISP((def a 1) (set! a (+ a 1)) (get a))LISP"), env)) == R"LISP(2)LISP");
+  }
+
+  {
+    std::cout << "output: '" << show(eval(parse(R"LISP((def a 1) (set! a (+ 2 1)) (get a))LISP"), env)) << "'" << std::endl;
     // eval(parse(R"LISP((def a 1) (print a))LISP"));
   }
 
