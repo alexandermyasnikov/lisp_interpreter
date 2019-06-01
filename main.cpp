@@ -123,6 +123,22 @@ namespace lisp_interpreter {
     object_list_t(object_t head, object_t tail) : head(head), tail(tail) { }
   };
 
+  struct env_t;
+  using envs_t = std::shared_ptr<env_t>;
+
+  struct env_t : std::enable_shared_from_this<env_t> {
+    using key_t = std::string;
+    using val_t = object_t;
+
+    std::map<key_t, val_t> frame;
+    envs_t parent;
+
+    env_t(envs_t parent = nullptr) : parent(parent) { }
+    object_t setvar(const key_t& key, const val_t& val);
+    object_t getvar(const key_t& key);
+    object_t defvar(const key_t& key, const val_t& val);
+  };
+
 
 
   // FD
@@ -217,6 +233,37 @@ namespace lisp_interpreter {
     return std::get_if<object_error_t>(&object);
   }
 
+  object_t env_t::setvar(const key_t& key, const val_t& val) {
+    auto env = shared_from_this();
+    while (env) {
+      auto fr = env->frame;
+      auto it = fr.find(key);
+      if (it != fr.end()) {
+        it->second = val;
+        return val;
+      }
+      env = env->parent;
+    }
+    return error("variable '" + key + "' not found");
+  }
+
+  object_t env_t::getvar(const key_t& key) {
+    auto env = shared_from_this();
+    while (env) {
+      auto fr = env->frame;
+      auto it = fr.find(key);
+      if (it != fr.end()) {
+        return it->second;
+      }
+      env = env->parent;
+    }
+    return error("variable '" + key + "' not found");
+  }
+
+  object_t env_t::defvar(const key_t& key, const val_t& val) {
+    frame[key] = val;
+    return val;
+  }
 
   std::pair<object_t, object_t> decompose(const object_t& object) {
     if (is_error(object))
@@ -490,6 +537,12 @@ namespace lisp_interpreter {
   object_t eval_op(const object_t& object_op, const object_t& tail) {
     object_t ret = nil();
     object_t prev = nil();
+
+    if (is_list(object_op)) {
+      auto res = eval(object_op);
+      return !is_nil(tail) ? eval(tail) : res;
+    }
+
     auto op = as_atom_operator(object_op);
     if (!op) return error("eval_op: unexpected '" + show(object_op) + "', expected operator");
     if (is_nil(tail)) return error("unexpected nil, expected operand after '" + show(object_op) + "'");
@@ -558,6 +611,26 @@ namespace lisp_interpreter {
           prev = curr;
           break;
         }
+        case op_t::DEF: {
+          if (is_nil(prev)) { prev = curr; break; }
+          auto var = as_atom_variable(prev);
+          if (!var) return error("eval_op: unexpected '" + show(prev) + "', expected variable");
+          auto env = std::make_shared<env_t>(); // TODO
+          return env->defvar(var->name, curr);
+        }
+        case op_t::SET: {
+          if (is_nil(prev)) { prev = curr; break; }
+          auto var = as_atom_variable(prev);
+          if (!var) return error("eval_op: unexpected '" + show(prev) + "', expected variable");
+          auto env = std::make_shared<env_t>(); // TODO
+          return env->setvar(var->name, curr);
+        }
+        case op_t::GET: {
+          auto var = as_atom_variable(curr);
+          if (!var) return error("eval_op: unexpected '" + show(prev) + "', expected variable");
+          auto env = std::make_shared<env_t>(); // TODO
+          return env->getvar(var->name);
+        }
         case op_t::QUOTE: {
           return tail;
           break;
@@ -600,7 +673,7 @@ namespace lisp_interpreter {
         // case op_t::LAMBDA: { }
         // case op_t::MACRO: { }
         // case op_t::MACROEXPAND: { }
-        default: return error("unexpected '" + show(object_op) + "'operator");
+        default: return error("unexpected '" + show(object_op) + "' operator");
       }
       t = p.second;
     }
@@ -633,6 +706,8 @@ int main() {
 
 
   // T E S T
+
+  auto env = std::make_shared<env_t>(); // TODO
 
   {
     auto l = atom_bool(true);
@@ -748,10 +823,12 @@ int main() {
     assert(show(eval(parse(R"LISP((cons 0 1 (+ 1 1) (quote 3 4)))LISP"))) == R"LISP((0 1 2 (3 4)))LISP");
     assert(show(eval(parse(R"LISP(car (cons 0 1 (+ 1 1) (quote 3 4)))LISP"))) == R"LISP(0)LISP");
     assert(show(eval(parse(R"LISP(cdr (cons 0 1 (+ 1 1) (quote 3 4)))LISP"))) == R"LISP((1 2 (3 4)))LISP");
+    assert(show(eval(parse(R"LISP((+ 1 2)(* 10 2)(+ 5 2))LISP"))) == R"LISP(7)LISP");
   }
 
   {
-    std::cout << "output: '" << show(eval(parse(R"LISP(cdr (cons 0 1 (+ 1 1) (quote 3 4)))LISP"))) << "'" << std::endl;
+    std::cout << "output: '" << show(eval(parse(R"LISP((def a (quote 1 2 3)) (get a))LISP"))) << "'" << std::endl;
+    // eval(parse(R"LISP((def a 1) (print a))LISP"));
   }
 
   return 0;
