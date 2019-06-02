@@ -538,7 +538,11 @@ namespace lisp_interpreter {
     object_t ret = nil();
     object_t prev = nil();
 
-    if (is_list(object_op)) {
+    if (is_list(object_op)
+        || as_atom_bool(object_op)
+        || as_atom_int(object_op)
+        || as_atom_double(object_op)
+        || as_atom_string(object_op)) {
       auto res = eval(object_op, env);
       return !is_nil(tail) ? eval(tail, env) : res;
     }
@@ -821,6 +825,7 @@ int main() {
     assert(show(eval(parse(R"LISP(car (cons 0 1 (+ 1 1) (quote 3 4)))LISP"), env)) == R"LISP(0)LISP");
     assert(show(eval(parse(R"LISP(cdr (cons 0 1 (+ 1 1) (quote 3 4)))LISP"), env)) == R"LISP((1 2 (3 4)))LISP");
     assert(show(eval(parse(R"LISP((+ 1 2)(* 10 2)(+ 5 2))LISP"), env)) == R"LISP(7)LISP");
+    assert(show(eval(parse(R"LISP(1 2 3)LISP"), env)) == R"LISP(3)LISP");
   }
 
   {
