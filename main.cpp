@@ -834,6 +834,21 @@ int main() {
     // eval(parse(R"LISP((def a 1) (print a))LISP"));
   }
 
+
+
+  // R E P L
+  {
+    std::string str;
+    while (true) {
+      std::cout << "lisp $ ";
+      std::getline(std::cin, str);
+      if (str == ":q") break;
+      auto l = parse(str);
+      std::cout << "struct: \t'" << show_struct(l) << "'" << std::endl;
+      std::cout << "eval:   \t'" << show(eval(l, env)) << "'" << std::endl;
+    }
+  }
+
   return 0;
 }
 
