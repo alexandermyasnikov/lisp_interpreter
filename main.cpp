@@ -30,10 +30,12 @@ namespace lisp_interpreter {
 
   struct object_variable_t {
     std::string name;
-    // context TODO
 
     object_variable_t(const std::string& name) : name(name) { }
   };
+
+  struct object_lambda_t;
+  using object_lambda_sptr_t = std::shared_ptr<const object_lambda_t>;
 
   struct object_list_t;
   using object_list_sptr_t = std::shared_ptr<const object_list_t>;
@@ -113,18 +115,28 @@ namespace lisp_interpreter {
     std::string,           // atom
     op_t,                  // atom
     object_variable_t,     // atom
+    object_lambda_sptr_t,  // atom
     object_list_sptr_t     // list
   >;
+
+  struct env_t;
+  using envs_t = std::shared_ptr<env_t>;
+
+  struct object_lambda_t {
+    object_t args;
+    object_t body;
+    envs_t   env;
+
+    object_lambda_t(const object_t& args, const object_t& body, envs_t env)
+        : args(args), body(body), env(env) { }
+  };
 
   struct object_list_t {
     object_t head;
     object_t tail;
 
-    object_list_t(object_t head, object_t tail) : head(head), tail(tail) { }
+    object_list_t(const object_t& head, const object_t& tail) : head(head), tail(tail) { }
   };
-
-  struct env_t;
-  using envs_t = std::shared_ptr<env_t>;
 
   struct env_t : std::enable_shared_from_this<env_t> {
     using key_t = std::string;
@@ -184,6 +196,10 @@ namespace lisp_interpreter {
     return object_variable_t(value);
   }
 
+  object_t lambda(const object_t& args, const object_t& body, envs_t env) {
+    return std::make_shared<object_lambda_t>(args, body, env);
+  }
+
   object_t list(const object_t& head, const object_t& tail) {
     return std::make_shared<object_list_t>(head, tail);
   }
@@ -214,6 +230,10 @@ namespace lisp_interpreter {
 
   const object_variable_t* as_atom_variable(const object_t& object) {
     return std::get_if<object_variable_t>(&object);
+  }
+
+  const object_lambda_sptr_t* as_atom_lambda(const object_t& object) {
+    return std::get_if<object_lambda_sptr_t>(&object);
   }
 
   const object_list_sptr_t* as_atom_list(const object_t& object) {
@@ -373,6 +393,9 @@ namespace lisp_interpreter {
         [&str] (object_variable_t v) {
           str += v.name;
         },
+        [&str] (object_lambda_sptr_t v) {
+          str += "(lamdba " + show(v->args) + " " + show(v->body) + ")";
+        },
         [&str, &object] (object_list_sptr_t) {
           auto p = decompose(object);
           str += "(";
@@ -414,6 +437,9 @@ namespace lisp_interpreter {
         },
         [&str] (object_variable_t v) {
           str += "V:" + v.name + " ";
+        },
+        [&str] (object_lambda_sptr_t v) {
+          str += "L: ( " + show_struct(v->args) + " ) ( " + show_struct(v->body) + " )";
         },
         [&str, &object] (object_list_sptr_t) {
           str += "LIST ( " + show_struct(car(object)) + ") ( " + show_struct(cdr(object)) + ") ";
@@ -547,6 +573,30 @@ namespace lisp_interpreter {
       return !is_nil(tail) ? eval(tail, env) : res;
     }
 
+    if (auto var = as_atom_variable(object_op); var) { // TODO
+      auto tmp = eval(object_op, env);
+      if (auto *fun = as_atom_lambda(tmp); fun) {
+        auto args = (*fun)->args;
+        auto vals = tail;
+        if (!is_list(args) && !is_nil(args))
+          return error("eval_op: unexpected '" + show(args) + "', expected list or nil");
+        if (!is_list(vals) && !is_nil(vals))
+          return error("eval_op: unexpected '" + show(vals) + "', expected list or nil");
+        auto env_args = std::make_shared<env_t>((*fun)->env);
+        while (!is_nil(args)) {
+          auto pa = decompose(args);
+          auto pv = decompose(vals);
+          auto *arg = as_atom_variable(pa.first);
+          if (!arg) return error("eval_op: unexpected '" + show(pa.first) + "', expected variable");
+          env_args->defvar(arg->name, eval(pv.first, env));
+          args = pa.second;
+          vals = pv.second;
+        }
+        auto res = eval((*fun)->body, env_args); // XXX
+      }
+      return tmp;
+    }
+
     auto op = as_atom_operator(object_op);
     if (!op) return error("eval_op: unexpected '" + show(object_op) + "', expected operator");
     if (is_nil(tail)) return error("unexpected nil, expected operand after '" + show(object_op) + "'");
@@ -618,13 +668,13 @@ namespace lisp_interpreter {
         case op_t::DEF: {
           if (is_nil(prev)) { prev = p.first; break; } // Не вычисляем
           auto var = as_atom_variable(prev);
-          if (!var) return error("eval_op: unexpected '" + show(prev) + "', expected variable");
+          if (!var) return error("eval_op def: unexpected '" + show(prev) + "', expected variable");
           return env->defvar(var->name, curr);
         }
         case op_t::SET: {
           if (is_nil(prev)) { prev = p.first; break; }
           auto var = as_atom_variable(prev);
-          if (!var) return error("eval_op: unexpected '" + show(prev) + "', expected variable");
+          if (!var) return error("eval_op set: unexpected '" + show(prev) + "', expected variable");
           auto tmp = env->setvar(var->name, curr);
           return tmp;
         }
@@ -646,6 +696,7 @@ namespace lisp_interpreter {
               [&type] (const std::string&)   { type = "string"; },
               [&type] (op_t)                 { type = "operator"; },
               [&type] (object_variable_t)    { type = "variable"; },
+              [&type] (object_lambda_sptr_t) { type = "lambda"; },
               [&type] (object_list_sptr_t)   { type = "list"; },
           }, curr);
           return atom_string(type);
@@ -670,10 +721,13 @@ namespace lisp_interpreter {
         // case op_t::READ: { }
         // case op_t::EVAL: { }
         // case op_t::EVALIN { }
-        // case op_t::LAMBDA: { }
+        case op_t::LAMBDA: {
+          if (is_nil(prev)) { prev = p.first; break; }
+          return lambda(prev, p.first, env);
+        }
         // case op_t::MACRO: { }
         // case op_t::MACROEXPAND: { }
-        default: return error("unexpected '" + show(object_op) + "' operator");
+        default: return error("eval_op: unexpected '" + show(object_op) + "' operator");
       }
       t = p.second;
     }
@@ -835,7 +889,7 @@ int main() {
   }
 
   {
-    std::cout << "output: '" << show(eval(parse(R"LISP((def a 1) (set! a (+ 2 1)) (get a))LISP"), env)) << "'" << std::endl;
+    std::cout << "output: '" << show(eval(parse(R"LISP((def sum (lambda (x y) (+ x  y))) (sum (+ 1 2) 3))LISP"), env)) << "'" << std::endl;
     // eval(parse(R"LISP((def a 1) (print a))LISP"));
   }
 
@@ -847,7 +901,7 @@ int main() {
     while (true) {
       std::cout << "lisp $ ";
       std::getline(std::cin, str);
-      if (str == ":q") break;
+      if (str == "") break;
       auto l = parse(str);
       std::cout << "struct: \t'" << show_struct(l) << "'" << std::endl;
       std::cout << "eval:   \t'" << show(eval(l, env)) << "'" << std::endl;
