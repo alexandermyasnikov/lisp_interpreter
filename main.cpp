@@ -561,6 +561,8 @@ namespace lisp_interpreter {
   }
 
   object_t eval_op(const object_t& object_op, const object_t& tail, envs_t env) {
+    if (is_error(object_op)) return object_op;
+
     object_t ret = nil();
     object_t prev = nil();
 
@@ -592,9 +594,9 @@ namespace lisp_interpreter {
           args = pa.second;
           vals = pv.second;
         }
-        auto res = eval((*fun)->body, env_args); // XXX
+        return eval((*fun)->body, env_args);
       }
-      return tmp;
+      return env->getvar(var->name);
     }
 
     auto op = as_atom_operator(object_op);
@@ -603,7 +605,7 @@ namespace lisp_interpreter {
     auto t = tail;
     while (!is_nil(t)) {
       auto p = decompose(t);
-      auto curr = eval(p.first, env);
+      auto curr = *op != op_t::COND ? eval(p.first, env) : p.first; // TODO
       switch (*op) {
         case op_t::ADD: {
           ret = is_nil(ret)
@@ -675,8 +677,7 @@ namespace lisp_interpreter {
           if (is_nil(prev)) { prev = p.first; break; }
           auto var = as_atom_variable(prev);
           if (!var) return error("eval_op set: unexpected '" + show(prev) + "', expected variable");
-          auto tmp = env->setvar(var->name, curr);
-          return tmp;
+          return env->setvar(var->name, curr);
         }
         case op_t::GET: {
           return curr; // Уже вычислено
@@ -713,7 +714,17 @@ namespace lisp_interpreter {
           return cdr(curr);
           break;
         }
-        // case op_t::COND: { }
+        case op_t::COND: { // XXX
+          if (is_nil(prev)) { prev = eval(p.first, env); break; }
+          auto b = as_atom_bool(prev);
+          if (!b) return error("eval_op cond: unexpected '" + show(prev) + "', expected bool");
+          if (*b) {
+            return eval(p.first, env);
+          } else {
+            prev = nil();
+          }
+          break;
+        }
         case op_t::PRINT: {
           std::cout << show(curr) << std::endl;
           break;
@@ -735,7 +746,7 @@ namespace lisp_interpreter {
     return ret;
   }
 
-  object_t eval(const object_t& object, envs_t env) { // TODO
+  object_t eval(const object_t& object, envs_t env) {
     if (is_error(object)) return object;
     object_t ret = object;
     std::visit(overloaded {
@@ -880,16 +891,22 @@ int main() {
     assert(show(eval(parse(R"LISP(cdr (cons 0 1 (+ 1 1) (quote 3 4)))LISP"), env)) == R"LISP((1 2 (3 4)))LISP");
     assert(show(eval(parse(R"LISP((+ 1 2)(* 10 2)(+ 5 2))LISP"), env)) == R"LISP(7)LISP");
     assert(show(eval(parse(R"LISP(1 2 3)LISP"), env)) == R"LISP(3)LISP");
+    assert(show(eval(parse(R"LISP((cond (> 2 2) ("a") (true) ("b") ))LISP"), env)) == R"LISP("b")LISP");
   }
 
   {
     assert(show(eval(parse(R"LISP((def a 1) (+ a 1))LISP"), env)) == R"LISP(2)LISP");
     assert(show(eval(parse(R"LISP((def a (quote 1 2 3)) (get a))LISP"), env)) == R"LISP((1 2 3))LISP");
     assert(show(eval(parse(R"LISP((def a 1) (set! a (+ a 1)) (get a))LISP"), env)) == R"LISP(2)LISP");
+    assert(show(eval(parse(R"LISP((def f (lambda (x) (cond (> x 0) (* x (f (- x 1))) (true) (1)))) (f 1))LISP"), env)) == R"LISP(1)LISP");
+    assert(show(eval(parse(R"LISP((f -1))LISP"), env)) == R"LISP(1)LISP");
+    assert(show(eval(parse(R"LISP((f 5))LISP"), env)) == R"LISP(120)LISP");
+    assert(show(eval(parse(R"LISP((f 10))LISP"), env)) == R"LISP(3628800)LISP");
   }
 
   {
-    std::cout << "output: '" << show(eval(parse(R"LISP((def sum (lambda (x y) (+ x  y))) (sum (+ 1 2) 3))LISP"), env)) << "'" << std::endl;
+    std::cout << "output: '" << show(eval(parse(R"LISP((def f (lambda (x) (cond (> x 0) (* x (f (- x 1))) (true) (1) ))) (f 1))LISP"), env)) << "'" << std::endl;
+    // std::cout << "output: '" << show(eval(parse(R"LISP((cond (> 2 2) ("a") (true) ("b") ))LISP"), env)) << "'" << std::endl;
     // eval(parse(R"LISP((def a 1) (print a))LISP"));
   }
 
