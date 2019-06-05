@@ -110,7 +110,7 @@ namespace lisp_interpreter {
     object_nil_t,          // ()
     object_error_t,        // error
     bool,                  // atom
-    int,                   // atom
+    int64_t,               // atom
     double,                // atom
     std::string,           // atom
     op_t,                  // atom
@@ -176,7 +176,7 @@ namespace lisp_interpreter {
     return value;
   }
 
-  object_t atom_int(int value) {
+  object_t atom_int(int64_t value) {
     return value;
   }
 
@@ -212,8 +212,8 @@ namespace lisp_interpreter {
     return std::get_if<bool>(&object);
   }
 
-  const int* as_atom_int(const object_t& object) {
-    return std::get_if<int>(&object);
+  const int64_t* as_atom_int(const object_t& object) {
+    return std::get_if<int64_t>(&object);
   }
 
   const double* as_atom_double(const object_t& object) {
@@ -378,7 +378,7 @@ namespace lisp_interpreter {
         [&str] (bool v) {
           str += v ? "true" : "false";
         },
-        [&str] (int v) {
+        [&str] (int64_t v) {
           str += std::to_string(v);
         },
         [&str] (double v) {
@@ -423,7 +423,7 @@ namespace lisp_interpreter {
         [&str] (bool v) {
           str += "B:"s + (v ? "true" : "false") + " ";
         },
-        [&str] (int v) {
+        [&str] (int64_t v) {
           str += "I:" + std::to_string(v) + " ";
         },
         [&str] (double v) {
@@ -692,7 +692,7 @@ namespace lisp_interpreter {
               [&type] (object_nil_t)         { type = "nil"; },
               [&type] (object_error_t)       { type = "error"; },
               [&type] (bool)                 { type = "bool"; },
-              [&type] (int)                  { type = "int"; },
+              [&type] (int64_t)              { type = "int"; },
               [&type] (double)               { type = "double"; },
               [&type] (const std::string&)   { type = "string"; },
               [&type] (op_t)                 { type = "operator"; },
