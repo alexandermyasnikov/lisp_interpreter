@@ -5,10 +5,23 @@
 #include <stack>
 #include <variant>
 #include <algorithm>
+#include <sstream>
+
+#include "debug_logger.h"
 
 #define PR        std::cout << __PRETTY_FUNCTION__ << '\t' << __LINE__ << std::endl
 #define PRM(msg)  std::cout << __FUNCTION__ << ':' << __LINE__ << '\t' << msg << std::endl
 #define assert(x) if (!(x)) PRM("ASSERT " #x)
+
+
+
+#define DEBUG_LOGGER_TRACE_LISP          // DEBUG_LOGGER("lisp ", logger_indent_lisp_t::indent)
+#define DEBUG_LOGGER_LISP(...)           DEBUG_LOG("lisp ", logger_indent_lisp_t::indent, __VA_ARGS__)
+
+template <typename T>
+struct logger_indent_t { static inline int indent; };
+
+struct logger_indent_lisp_t   : logger_indent_t<logger_indent_lisp_t> { };
 
 
 
@@ -58,6 +71,7 @@ namespace lisp_interpreter {
     DEF,
     SET,
     GET,
+    CALL,
     QUOTE,
     TYPEOF,
     CONS,
@@ -68,6 +82,7 @@ namespace lisp_interpreter {
     READ,
     EVAL,
     EVALIN,
+    EVALSEQ,
     LAMBDA,
     MACRO,
     MACROEXPAND,
@@ -91,6 +106,7 @@ namespace lisp_interpreter {
     { "def",           op_t::DEF },
     { "set!",          op_t::SET },
     { "get",           op_t::GET },
+    { "call",          op_t::CALL },
     { "quote",         op_t::QUOTE },
     { "typeof",        op_t::TYPEOF },
     { "cons",          op_t::CONS },
@@ -100,7 +116,8 @@ namespace lisp_interpreter {
     { "print",         op_t::PRINT },
     { "read",          op_t::READ },
     { "eval",          op_t::EVAL },
-    { "eval-in",       op_t::EVALIN },
+    { "evalin",        op_t::EVALIN },
+    { "evalseq",       op_t::EVALSEQ },
     { "lambda",        op_t::LAMBDA },
     { "macro",         op_t::MACRO },
     { "macroexpand",   op_t::MACROEXPAND },
@@ -109,14 +126,16 @@ namespace lisp_interpreter {
   using object_t = std::variant<
     object_nil_t,          // ()
     object_error_t,        // error
-    bool,                  // atom
-    int,                   // atom
-    double,                // atom
-    std::string,           // atom
-    op_t,                  // atom
-    object_variable_t,     // atom
-    object_lambda_sptr_t,  // atom
+    bool,                  // bool
+    int64_t,               // number
+    double,                // number
+    std::string,           // string
+    op_t,                  // operator
+    object_variable_t,     // symbols
+    object_lambda_sptr_t,  // lambda
     object_list_sptr_t     // list
+    // object_map_sptr_t,  // map   // TODO
+    // object_array_sptr_t // array // TODO
   >;
 
   struct env_t;
@@ -146,19 +165,35 @@ namespace lisp_interpreter {
     envs_t parent;
 
     env_t(envs_t parent = nullptr) : parent(parent) { }
+    object_t defvar(const key_t& key, const val_t& val);
     object_t setvar(const key_t& key, const val_t& val);
     object_t getvar(const key_t& key);
-    object_t defvar(const key_t& key, const val_t& val);
+  };
+
+  struct context_t {
+    std::stringstream stream;
+    size_t eval_calls;
+    // size_t stack_level_max;
+    // size_t stack_level;
+
+    context_t() : stream{}, eval_calls{} { }
+
+    /*std::string show() {
+      stream << std::endl;
+      stream << "eval_calls: " << eval_calls << std::endl;
+      std::string ret = stream.str();
+      stream.clear();
+      return ret;
+    }*/
   };
 
 
 
   // FD
 
-  std::string show_struct(const object_t& object);
   std::string show(const object_t& object);
   object_t parse(const std::string& str);
-  object_t eval(const object_t& object, envs_t env);
+  object_t eval(const object_t& object, envs_t env, context_t& ctx);
 
 
 
@@ -176,7 +211,7 @@ namespace lisp_interpreter {
     return value;
   }
 
-  object_t atom_int(int value) {
+  object_t atom_int(int64_t value) {
     return value;
   }
 
@@ -212,8 +247,8 @@ namespace lisp_interpreter {
     return std::get_if<bool>(&object);
   }
 
-  const int* as_atom_int(const object_t& object) {
-    return std::get_if<int>(&object);
+  const int64_t* as_atom_int(const object_t& object) {
+    return std::get_if<int64_t>(&object);
   }
 
   const double* as_atom_double(const object_t& object) {
@@ -253,7 +288,14 @@ namespace lisp_interpreter {
     return std::get_if<object_error_t>(&object);
   }
 
+  object_t env_t::defvar(const key_t& key, const val_t& val) {
+    DEBUG_LOGGER_TRACE_LISP;
+    frame[key] = val;
+    return val;
+  }
+
   object_t env_t::setvar(const key_t& key, const val_t& val) {
+    DEBUG_LOGGER_TRACE_LISP;
     auto env = shared_from_this();
     while (env) {
       auto &fr = env->frame;
@@ -268,6 +310,7 @@ namespace lisp_interpreter {
   }
 
   object_t env_t::getvar(const key_t& key) {
+    DEBUG_LOGGER_TRACE_LISP;
     auto env = shared_from_this();
     while (env) {
       auto &fr = env->frame;
@@ -280,16 +323,12 @@ namespace lisp_interpreter {
     return error("variable '" + key + "' not found");
   }
 
-  object_t env_t::defvar(const key_t& key, const val_t& val) {
-    frame[key] = val;
-    return val;
-  }
-
   std::pair<object_t, object_t> decompose(const object_t& object) {
+    DEBUG_LOGGER_TRACE_LISP;
     if (is_error(object))
       return {object, object};
     if (!is_list(object)) {
-      auto ret = error("decompose: unexpected '" + show(object) + "', expected list");
+      auto ret = error("decompose: unexpected '" + show(object) + "', expected list in '" + show(object) + "'");
       return {ret, ret};
     }
     auto list = std::get<object_list_sptr_t>(object);
@@ -297,22 +336,23 @@ namespace lisp_interpreter {
   }
 
   object_t car(const object_t& object) {
+    DEBUG_LOGGER_TRACE_LISP;
     return decompose(object).first;
   }
 
   object_t cdr(const object_t& object) {
+    DEBUG_LOGGER_TRACE_LISP;
     return decompose(object).second;
   }
 
   object_t cons(const object_t& head, const object_t& tail) {
-    if (is_error(head))
-      return head;
-    if (is_error(tail))
-      return tail;
+    DEBUG_LOGGER_TRACE_LISP;
+    if (is_error(head)) return head;
+    if (is_error(tail)) return tail;
     if (!is_list(tail) && !is_nil(tail))
-      return error("cons: unexpected '" + show(tail) + "', expected list or nil");
-    assert(show_struct(car(list(head, tail))) == show_struct(head));
-    assert(show_struct(cdr(list(head, tail))) == show_struct(tail));
+      return error("cons: unexpected '" + show(tail) + "', expected list or nil in '" + show(tail) + "'");
+    assert(show(car(list(head, tail))) == show(head));
+    assert(show(cdr(list(head, tail))) == show(tail));
     return list(head, tail);
   }
 
@@ -321,6 +361,7 @@ namespace lisp_interpreter {
   // L I B R A R Y
 
   object_t reverse(const object_t& object, bool recursive = true) {
+    DEBUG_LOGGER_TRACE_LISP;
     if (!is_list(object))
       return object;
     auto list_r = nil();
@@ -349,6 +390,7 @@ namespace lisp_interpreter {
       case op_t::DEF:          return "def";
       case op_t::SET:          return "set";
       case op_t::GET:          return "get";
+      case op_t::CALL:         return "call";
       case op_t::QUOTE:        return "quote";
       case op_t::TYPEOF:       return "typeof";
       case op_t::CONS:         return "cons";
@@ -359,14 +401,16 @@ namespace lisp_interpreter {
       case op_t::READ:         return "read";
       case op_t::EVAL:         return "eval";
       case op_t::EVALIN:       return "evalin";
+      case op_t::EVALSEQ:      return "evalseq";
       case op_t::LAMBDA:       return "lambda";
       case op_t::MACRO:        return "macro";
       case op_t::MACROEXPAND:  return "macroexpand";
-      default: return "O:U";
+      default:                 return "O:U";
     }
   }
 
   std::string show(const object_t& object) {
+    DEBUG_LOGGER_TRACE_LISP;
     std::string str;
     std::visit(overloaded {
         [&str] (object_nil_t) {
@@ -378,7 +422,7 @@ namespace lisp_interpreter {
         [&str] (bool v) {
           str += v ? "true" : "false";
         },
-        [&str] (int v) {
+        [&str] (int64_t v) {
           str += std::to_string(v);
         },
         [&str] (double v) {
@@ -397,7 +441,6 @@ namespace lisp_interpreter {
           str += "(lamdba " + show(v->args) + " " + show(v->body) + ")";
         },
         [&str, &object] (object_list_sptr_t) {
-          auto p = decompose(object);
           str += "(";
           auto l = object;
           while (!is_nil(l)) {
@@ -411,46 +454,10 @@ namespace lisp_interpreter {
     return str;
   }
 
-  std::string show_struct(const object_t& object) {
-    std::string str;
-    std::visit(overloaded {
-        [&str] (object_nil_t) {
-          str += "nil ";
-        },
-        [&str] (object_error_t error) {
-          str += "E:\""s + error.msg + "\" ";
-        },
-        [&str] (bool v) {
-          str += "B:"s + (v ? "true" : "false") + " ";
-        },
-        [&str] (int v) {
-          str += "I:" + std::to_string(v) + " ";
-        },
-        [&str] (double v) {
-          str += "D:" + std::to_string(v) + " ";
-        },
-        [&str] (const std::string& v) {
-          str += "S:\"" + v + "\" ";
-        },
-        [&str] (op_t v) {
-          str += "O:" + show_operator(v) + " ";
-        },
-        [&str] (object_variable_t v) {
-          str += "V:" + v.name + " ";
-        },
-        [&str] (object_lambda_sptr_t v) {
-          str += "L: ( " + show_struct(v->args) + " ) ( " + show_struct(v->body) + " )";
-        },
-        [&str, &object] (object_list_sptr_t) {
-          str += "LIST ( " + show_struct(car(object)) + ") ( " + show_struct(cdr(object)) + ") ";
-        },
-    }, object);
-    return str;
-  }
-
   object_t parse(const std::string& str) {
+    DEBUG_LOGGER_TRACE_LISP;
     std::stack<object_t> stack;
-    object_t ret = nil();
+    auto ret = nil();
     const char *it = str.c_str();
     const char *ite = str.c_str() + str.size();
     while (it != ite) {
@@ -514,252 +521,427 @@ namespace lisp_interpreter {
     return reverse(ret);
   }
 
-  object_t op_arithmetic(const object_t& a, const object_t& b, auto f) {
-    if (is_error(a)) return a;
-    if (is_error(b)) return b;
-    auto ai = as_atom_int(a);
-    auto bi = as_atom_int(b);
-    auto ad = as_atom_double(a);
-    auto bd = as_atom_double(b);
-    if (ai && bi) return f(*ai, *bi);
-    if (ai && bd) return f(*ai, *bd);
-    if (ad && bi) return f(*ad, *bi);
-    if (ad && bd) return f(*ad, *bd);
-    return (ai || ad)
-      ? error("op_add: unexpected '" + show(b) + "', expected int or double")
-      : error("op_add: unexpected '" + show(a) + "', expected int or double");
-  }
-
-  object_t op_int(const object_t& a, const object_t& b, auto f) {
-    if (is_error(a)) return a;
-    if (is_error(b)) return b;
-    auto ai = as_atom_int(a);
-    auto bi = as_atom_int(b);
-    if (!ai) return error("op_int: unexpected '" + show(a) + "', expected int");
-    if (!bi) return error("op_int: unexpected '" + show(b) + "', expected int");
-    return f(*ai, *bi);
-  }
-
-  object_t op_string(const object_t& a, const object_t& b, auto f) {
-    if (is_error(a)) return a;
-    if (is_error(b)) return b;
-    auto as = as_atom_string(a);
-    auto bs = as_atom_string(b);
-    if (!as) return error("op_string: unexpected '" + show(a) + "', expected string");
-    if (!bs) return error("op_string: unexpected '" + show(b) + "', expected string");
-    return f(*as, *bs);
-  }
-
-  object_t op_bool(const object_t& a, const object_t& b, auto f) {
-    if (is_error(a)) return a;
-    if (is_error(b)) return b;
-    auto ab = as_atom_bool(a);
-    auto bb = as_atom_bool(b);
-    if (!ab) return error("op_bool: unexpected '" + show(a) + "', expected bool");
-    if (!bb) return error("op_bool: unexpected '" + show(b) + "', expected bool");
-    return f(*ab, *bb);
-  }
-
-  object_t eval_op(const object_t& object_op, const object_t& tail, envs_t env) {
-    if (is_error(object_op)) return object_op;
-
-    object_t ret = nil();
-    object_t prev = nil();
-
-    if (is_list(object_op)
-        || as_atom_bool(object_op)
-        || as_atom_int(object_op)
-        || as_atom_double(object_op)
-        || as_atom_string(object_op)) {
-      auto res = eval(object_op, env);
-      return !is_nil(tail) ? eval(tail, env) : res;
+  void for_each(const object_t& object, auto f) {
+    auto l = object;
+    while (!is_nil(l)) {
+      auto p = decompose(l);
+      if (!f(p.first)) break;
+      l = p.second;
     }
+  }
 
-    if (auto var = as_atom_variable(object_op); var) { // TODO
-      auto tmp = eval(object_op, env);
-      if (auto *fun = as_atom_lambda(tmp); fun) {
-        auto args = (*fun)->args;
-        auto vals = tail;
-        if (!is_list(args) && !is_nil(args))
-          return error("eval_op: unexpected '" + show(args) + "', expected list or nil");
-        if (!is_list(vals) && !is_nil(vals))
-          return error("eval_op: unexpected '" + show(vals) + "', expected list or nil");
-        auto env_args = std::make_shared<env_t>((*fun)->env);
-        while (!is_nil(args)) {
-          auto pa = decompose(args);
-          auto pv = decompose(vals);
-          auto *arg = as_atom_variable(pa.first);
-          if (!arg) return error("eval_op: unexpected '" + show(pa.first) + "', expected variable");
-          env_args->defvar(arg->name, eval(pv.first, env));
-          args = pa.second;
-          vals = pv.second;
+
+
+  object_t eval_quote(const object_t& head, const object_t& tail, envs_t, context_t&) {
+    if (is_nil(tail)) return error("quote: expected argument in '" + show(cons(head, tail)) + "'");
+    auto p = decompose(tail);
+    if (!is_nil(p.second)) return error("quote: wrong argument '" + show(car(p.second))
+          + "', too many arguments in '" + show(cons(head, tail)) + "'");
+    return p.first;
+  }
+
+  object_t eval_cons(const object_t& head, const object_t& tail, envs_t env, context_t& ctx) {
+    if (is_nil(tail)) return error("cons: expected argument (1) in '" + show(cons(head, tail)) + "'");
+    auto p = decompose(tail);
+    if (is_nil(p.second)) return error("cons: expected argument (2) in '" + show(cons(head, tail)) + "'");
+    auto h = eval(p.first, env, ctx);
+    p = decompose(p.second);
+    if (!is_nil(p.second)) return error("cons: wrong argument (3) '" + show(car(p.second))
+          + "', too many arguments in '" + show(cons(head, tail)) + "'");
+    auto t = eval(p.first, env, ctx);
+    return cons(h, t);
+  }
+
+  object_t eval_car(const object_t& head, const object_t& tail, envs_t env, context_t& ctx) {
+    if (is_nil(tail)) return error("car: expected argument (1) in '" + show(cons(head, tail)) + "'");
+    auto p = decompose(tail);
+    if (!is_nil(p.second)) return error("car: wrong argument (2) '" + show(car(p.second))
+          + "', too many arguments in '" + show(cons(head, tail)) + "'");
+    auto t = eval(p.first, env, ctx);
+    return car(t);
+  }
+
+  object_t eval_cdr(const object_t& head, const object_t& tail, envs_t env, context_t& ctx) {
+    if (is_nil(tail)) return error("cdr: expected argument (1) in '" + show(cons(head, tail)) + "'");
+    auto p = decompose(tail);
+    if (!is_nil(p.second)) return error("cdr: wrong argument (2) '" + show(car(p.second))
+          + "', too many arguments in '" + show(cons(head, tail)) + "'");
+    auto t = eval(p.first, env, ctx);
+    return cdr(t);
+  }
+
+  object_t eval_cond(const object_t&, const object_t& tail, envs_t env, context_t& ctx) {
+    auto ret = nil();
+    for_each(tail, [&ret, &env, &ctx](const object_t& object) -> bool {
+      auto p = decompose(object);
+      auto condition = eval(p.first, env, ctx);
+      if (auto b = as_atom_bool(condition); b) {
+        if (*b) {
+          ret = eval(car(p.second), env, ctx); // XXX
+          return false;
         }
-        return eval((*fun)->body, env_args);
+      } else {
+        ret = error("cond: unexpected '" + show(condition)
+            + "', expected bool expression in '" + show(p.first) + "'");
+        return false;
       }
-      return env->getvar(var->name);
-    }
-
-    auto op = as_atom_operator(object_op);
-    if (!op) return error("eval_op: unexpected '" + show(object_op) + "', expected operator");
-    if (is_nil(tail)) return error("unexpected nil, expected operand after '" + show(object_op) + "'");
-    auto t = tail;
-    while (!is_nil(t)) {
-      auto p = decompose(t);
-      auto curr = *op != op_t::COND ? eval(p.first, env) : p.first; // TODO
-      switch (*op) {
-        case op_t::ADD: {
-          ret = is_nil(ret)
-            ? (is_nil(curr) ? error("unexpected nil, expected operand") : curr)
-            : op_arithmetic(ret, curr, [](auto a, auto b) -> object_t { return a + b; });
-          break;
-        }
-        case op_t::SUB: {
-          ret = is_nil(ret)
-            ? (is_nil(curr) ? error("unexpected nil, expected operand") : curr)
-            : op_arithmetic(ret, curr, [](auto a, auto b) -> object_t { return a - b; });
-          break;
-        }
-        case op_t::MUL: {
-          ret = is_nil(ret)
-            ? (is_nil(curr) ? error("unexpected nil, expected operand") : curr)
-            : op_arithmetic(ret, curr, [](auto a, auto b) -> object_t { return a * b; });
-          break;
-        }
-        case op_t::DIV: {
-          ret = is_nil(ret)
-            ? (is_nil(curr) ? error("unexpected nil, expected operand") : curr)
-            : op_arithmetic(ret, curr, [](auto a, auto b) -> object_t { return b != 0 ? a / b : error("division by zero"); });
-          break;
-        }
-        case op_t::MOD: {
-          ret = is_nil(ret)
-            ? (is_nil(curr) ? error("unexpected nil, expected operand") : curr)
-            : op_int(ret, curr, [](auto a, auto b) -> object_t { return a % b; });
-          break;
-        }
-        case op_t::SCONCAT: {
-          ret = is_nil(ret)
-            ? (is_nil(curr) ? error("unexpected nil, expected operand") : curr)
-            : op_string(ret, curr, [](auto a, auto b) -> object_t { return a + b; });
-          break;
-        }
-        case op_t::GT:
-        case op_t::GTE:
-        case op_t::LT:
-        case op_t::LTE:
-        case op_t::EQ:
-        case op_t::NOEQ: {
-          if (is_nil(ret)) { ret = atom_bool(true); }
-          if (is_nil(prev)) { prev = curr; break; }
-
-          object_t r;
-          switch (*op) {
-            case op_t::GT:   r = op_arithmetic(prev, curr, [](auto a, auto b) -> object_t { return a >  b; }); break;
-            case op_t::GTE:  r = op_arithmetic(prev, curr, [](auto a, auto b) -> object_t { return a >= b; }); break;
-            case op_t::LT:   r = op_arithmetic(prev, curr, [](auto a, auto b) -> object_t { return a <  b; }); break;
-            case op_t::LTE:  r = op_arithmetic(prev, curr, [](auto a, auto b) -> object_t { return a <= b; }); break;
-            case op_t::EQ:   r = op_arithmetic(prev, curr, [](auto a, auto b) -> object_t { return a == b; }); break;
-            case op_t::NOEQ: r = op_arithmetic(prev, curr, [](auto a, auto b) -> object_t { return a != b; }); break;
-            default: r = error("unexpected bool operator"); break;
-          }
-
-          ret = op_bool(ret, r, [](auto a, auto b) -> object_t { return a && b; });
-          prev = curr;
-          break;
-        }
-        case op_t::DEF: {
-          if (is_nil(prev)) { prev = p.first; break; } // Не вычисляем
-          auto var = as_atom_variable(prev);
-          if (!var) return error("eval_op def: unexpected '" + show(prev) + "', expected variable");
-          return env->defvar(var->name, curr);
-        }
-        case op_t::SET: {
-          if (is_nil(prev)) { prev = p.first; break; }
-          auto var = as_atom_variable(prev);
-          if (!var) return error("eval_op set: unexpected '" + show(prev) + "', expected variable");
-          return env->setvar(var->name, curr);
-        }
-        case op_t::GET: {
-          return curr; // Уже вычислено
-        }
-        case op_t::QUOTE: {
-          return tail;
-          break;
-        }
-        case op_t::TYPEOF: {
-          std::string type;
-          std::visit(overloaded {
-              [&type] (object_nil_t)         { type = "nil"; },
-              [&type] (object_error_t)       { type = "error"; },
-              [&type] (bool)                 { type = "bool"; },
-              [&type] (int)                  { type = "int"; },
-              [&type] (double)               { type = "double"; },
-              [&type] (const std::string&)   { type = "string"; },
-              [&type] (op_t)                 { type = "operator"; },
-              [&type] (object_variable_t)    { type = "variable"; },
-              [&type] (object_lambda_sptr_t) { type = "lambda"; },
-              [&type] (object_list_sptr_t)   { type = "list"; },
-          }, curr);
-          return atom_string(type);
-        }
-        case op_t::CONS: {
-          ret = cons(curr, ret);
-          break;
-        }
-        case op_t::CAR: {
-          return car(curr);
-          break;
-        }
-        case op_t::CDR: {
-          return cdr(curr);
-          break;
-        }
-        case op_t::COND: { // XXX
-          if (is_nil(prev)) { prev = eval(p.first, env); break; }
-          auto b = as_atom_bool(prev);
-          if (!b) return error("eval_op cond: unexpected '" + show(prev) + "', expected bool");
-          if (*b) {
-            return eval(p.first, env);
-          } else {
-            prev = nil();
-          }
-          break;
-        }
-        case op_t::PRINT: {
-          std::cout << show(curr) << std::endl;
-          break;
-        }
-        // case op_t::READ: { }
-        // case op_t::EVAL: { }
-        // case op_t::EVALIN { }
-        case op_t::LAMBDA: {
-          if (is_nil(prev)) { prev = p.first; break; }
-          return lambda(prev, p.first, env);
-        }
-        // case op_t::MACRO: { }
-        // case op_t::MACROEXPAND: { }
-        default: return error("eval_op: unexpected '" + show(object_op) + "' operator");
-      }
-      t = p.second;
-    }
-    if (*op == op_t::CONS) ret = reverse(ret, false);
+      return true;
+    });
     return ret;
   }
 
-  object_t eval(const object_t& object, envs_t env) {
-    if (is_error(object)) return object;
-    object_t ret = object;
+  object_t eval_arithmetic(const auto& op, const object_t& head, const object_t& tail, envs_t env, context_t& ctx) {
+    if (is_nil(tail)) return error("eval_arithmetic: expected argument (1) in '" + show(cons(head, tail)) + "'");
+    auto p = decompose(tail);
+    auto ret = eval(p.first, env, ctx);
+    if (!as_atom_int(ret) && !as_atom_double(ret)) return error("eval_arithmetic: unexpected '" + show(ret) + "' in '" + show(cons(head, tail)) + "'");
+    for_each(p.second, [&ret, &op, &head, &tail, &env, &ctx](const object_t& object) -> bool {
+      auto curr = eval(object, env, ctx);
+      if (as_atom_int(ret) && as_atom_int(curr)) {
+        ret = op(*as_atom_int(ret), *as_atom_int(curr));
+      } else if (as_atom_int(ret) && as_atom_double(curr)) {
+        ret = op(static_cast<double>(*as_atom_int(ret)), *as_atom_double(curr));
+      } else if (as_atom_double(ret) && as_atom_int(curr)) {
+        ret = op(*as_atom_double(ret), static_cast<double>(*as_atom_int(curr)));
+      } else {
+        ret = error("eval_arithmetic: unexpected '" + show(curr) + "' in '" + show(cons(head, tail)) + "'");
+        return false;
+      }
+      return true;
+    });
+    return ret;
+  }
+
+  object_t eval_concat(const auto& op, const object_t& head, const object_t& tail, envs_t env, context_t& ctx) {
+    if (is_nil(tail)) return error("eval_concat: expected argument (1) in '" + show(cons(head, tail)) + "'");
+    auto p = decompose(tail);
+    auto ret = eval(p.first, env, ctx);
+    for_each(p.second, [&ret, &op, &head, &tail, &env, &ctx](const object_t& object) -> bool {
+      auto curr = eval(object, env, ctx);
+      if (as_atom_string(ret) && as_atom_string(curr)) {
+        ret = op(*as_atom_string(ret), *as_atom_string(curr));
+      } else {
+        ret = error("eval_concat: unexpected '" + show(curr) + "' in '" + show(cons(head, tail)) + "'");
+        return false;
+      }
+      return true;
+    });
+    return ret;
+  }
+
+  object_t eval_cmp(const auto& op, const object_t& head, const object_t& tail, envs_t env, context_t& ctx) {
+    if (is_nil(tail)) return error("eval_cmp: expected argument (1) in '" + show(cons(head, tail)) + "'");
+    auto p = decompose(tail);
+    auto acc = eval(p.first, env, ctx);
+    auto ret = atom_bool(true);
+    for_each(p.second, [&acc, &ret, &op, &head, &tail, &env, &ctx](const object_t& object) -> bool {
+      auto curr = eval(object, env, ctx);
+      bool b = true;
+      if (as_atom_int(acc) && as_atom_int(curr)) {
+        b = op(*as_atom_int(acc), *as_atom_int(curr));
+      } else if (as_atom_double(acc) && as_atom_double(curr)) {
+        b = op(*as_atom_double(acc), *as_atom_double(curr));
+      } else if (as_atom_int(acc) && as_atom_double(curr)) {
+        ret = op(static_cast<double>(*as_atom_int(acc)), *as_atom_double(curr));
+      } else if (as_atom_double(acc) && as_atom_int(curr)) {
+        ret = op(*as_atom_double(acc), static_cast<double>(*as_atom_int(curr)));
+      } else if (as_atom_string(acc) && as_atom_string(curr)) {
+        b = op(*as_atom_string(acc), *as_atom_string(curr));
+      } else {
+        ret = error("eval_cmp: unexpected '" + show(curr) + "' in '" + show(cons(head, tail)) + "'");
+        return false;
+      }
+      if (!b) {
+        ret = atom_bool(false);
+        return false;
+      }
+      acc = curr;
+      return true;
+    });
+    return ret;
+  }
+
+  object_t eval_typeof(const object_t& head, const object_t& tail, envs_t env, context_t& ctx) {
+    if (is_nil(tail)) return error("typeof: expected argument (1) in '" + show(cons(head, tail)) + "'");
+    auto p = decompose(tail);
+    if (!is_nil(p.second)) return error("typeof: wrong argument (2) '" + show(car(p.second))
+          + "', too many arguments in '" + show(cons(head, tail)) + "'");
+    std::string type;
+    auto curr = eval(p.first, env, ctx);
     std::visit(overloaded {
-        [&ret, env] (object_list_sptr_t) {
-          auto p = decompose(ret);
-          ret = eval_op(p.first, p.second, env);
+      [&type] (object_nil_t)         { type = "nil"; },
+      [&type] (object_error_t)       { type = "error"; },
+      [&type] (bool)                 { type = "bool"; },
+      [&type] (int64_t)              { type = "int"; },
+      [&type] (double)               { type = "double"; },
+      [&type] (const std::string&)   { type = "string"; },
+      [&type] (op_t)                 { type = "operator"; },
+      [&type] (object_variable_t)    { type = "variable"; },
+      [&type] (object_lambda_sptr_t) { type = "lambda"; },
+      [&type] (object_list_sptr_t)   { type = "list"; },
+    }, curr);
+    return atom_string(type);
+  }
+
+  object_t eval_eval(const object_t& head, const object_t& tail, envs_t env, context_t& ctx) {
+    if (is_nil(tail)) return error("eval: expected argument (1) in '" + show(cons(head, tail)) + "'");
+    auto p = decompose(tail);
+    if (!is_nil(p.second)) return error("eval: wrong argument (2) '" + show(car(p.second))
+          + "', too many arguments in '" + show(cons(head, tail)) + "'");
+    return eval(p.first, env, ctx);
+  }
+
+  object_t eval_evalseq(const object_t&, const object_t& tail, envs_t env, context_t& ctx) {
+    auto ret = nil();
+    for_each(tail, [&env, &ctx, &ret](const object_t& object) -> bool {
+      auto curr = eval(object, env, ctx);
+      ret = cons(curr, ret);
+      return true;
+    });
+    return reverse(ret, false);
+  }
+
+  object_t eval_print(const object_t&, const object_t& tail, envs_t env, context_t& ctx) {
+    auto ret = nil();
+    for_each(tail, [&env, &ctx, &ret](const object_t& object) -> bool {
+      auto curr = eval(object, env, ctx);
+      ctx.stream << show(curr);
+      ret = object;
+      return true;
+    });
+    return ret;
+  }
+
+  object_t eval_lambda(const object_t& head, const object_t& tail, envs_t env, context_t&) {
+    if (is_nil(tail)) return error("lambda: expected argument (1) in '" + show(cons(head, tail)) + "'");
+    auto p = decompose(tail);
+    if (is_nil(p.second)) return error("lambda: expected argument (2) in '" + show(cons(head, tail)) + "'");
+    auto args = p.first;
+    p = decompose(p.second);
+    if (!is_nil(p.second)) return error("lambda: wrong argument (3) '" + show(car(p.second))
+          + "', too many arguments in '" + show(cons(head, tail)) + "'");
+    auto body = p.first;
+    return lambda(args, body, env);
+  }
+
+  object_t eval_def(const object_t& head, const object_t& tail, envs_t env, context_t& ctx) {
+    if (is_nil(tail)) return error("def: expected argument (1) in '" + show(cons(head, tail)) + "'");
+    auto p = decompose(tail);
+    if (is_nil(p.second)) return error("def: expected argument (2) in '" + show(cons(head, tail)) + "'");
+    auto var = p.first;
+    p = decompose(p.second);
+    if (!is_nil(p.second)) return error("def: wrong argument (3) '" + show(car(p.second))
+          + "', too many arguments in '" + show(cons(head, tail)) + "'");
+    auto val = p.first;
+
+    auto pvar = as_atom_variable(var);
+    if (!pvar) return error("def: unexpected '" + show(var) + "', expected variable");
+    val = eval(val, env, ctx);
+
+    return env->defvar(pvar->name, val);
+  }
+
+  object_t eval_set(const object_t& head, const object_t& tail, envs_t env, context_t& ctx) {
+    if (is_nil(tail)) return error("set: expected argument (1) in '" + show(cons(head, tail)) + "'");
+    auto p = decompose(tail);
+    if (is_nil(p.second)) return error("set: expected argument (2) in '" + show(cons(head, tail)) + "'");
+    auto var = p.first;
+    p = decompose(p.second);
+    if (!is_nil(p.second)) return error("set: wrong argument (3) '" + show(car(p.second))
+          + "', too many arguments in '" + show(cons(head, tail)) + "'");
+    auto val = p.first;
+
+    auto pvar = as_atom_variable(var);
+    if (!pvar) return error("set: unexpected '" + show(var) + "', expected variable");
+    val = eval(val, env, ctx);
+
+    return env->setvar(pvar->name, val);
+  }
+
+  object_t eval_get(const object_t& head, const object_t& tail, envs_t env, context_t&) {
+    if (is_nil(tail)) return error("get: expected argument (1) in '" + show(cons(head, tail)) + "'");
+    auto p = decompose(tail);
+    if (!is_nil(p.second)) return error("get: wrong argument (2) '" + show(car(p.second))
+          + "', too many arguments in '" + show(cons(head, tail)) + "'");
+    auto pvar = as_atom_variable(p.first);
+    if (!pvar) return error("def: unexpected '" + show(p.first) + "', expected variable");
+
+    return env->getvar(pvar->name);
+  }
+
+  object_t eval_call(const object_t& head, const object_t& tail, envs_t env, context_t& ctx) {
+    if (is_nil(tail)) return error("call: expected argument (1) in '" + show(cons(head, tail)) + "'");
+    auto p = decompose(tail);
+    // if (is_nil(p.second)) return error("call: expected argument (2) in '" + show(cons(head, tail)) + "'");
+    if (!as_atom_variable(p.first)) return error("call: expected variable (1) in '" + show(cons(head, tail)) + "'");
+    auto var = *as_atom_variable(p.first);
+    auto args = p.second;
+    // DEBUG_LOGGER_LISP("var: %s", show(var).c_str());
+    // DEBUG_LOGGER_LISP("args: %s", show(args).c_str());
+
+    auto ofun = env->getvar(var.name);
+    if (!as_atom_lambda(ofun)) return error("call: unexpected '" + show(ofun) + "', expected lambda");
+    auto fun = *as_atom_lambda(ofun);
+    auto fargs = fun->args;
+
+    auto env_args = std::make_shared<env_t>(fun->env);
+    while (!is_nil(fargs)) {
+      auto pf = decompose(fargs);
+      auto pa = decompose(args);
+      auto *parg = as_atom_variable(pf.first);
+      if (!parg) return error("eval_call: unexpected '" + show(pf.first) + "', expected variable");
+      env_args->defvar(parg->name, eval(pa.first, env, ctx));
+      fargs = pf.second;
+      args  = pa.second;
+    }
+
+    return eval(fun->body, env_args, ctx);
+  }
+
+  object_t eval_list(const object_t& head, const object_t& tail, envs_t env, context_t& ctx) {
+    DEBUG_LOGGER_TRACE_LISP;
+    auto ret = nil();
+    std::visit(overloaded {
+        [&ret, &head, &tail, env, &ctx] (op_t v) {
+          switch (v) {
+            case op_t::ADD: {
+              ret = eval_arithmetic(std::plus<>(), head, tail, env, ctx);
+              break;
+            }
+            case op_t::SUB: {
+              ret = eval_arithmetic(std::minus<>(), head, tail, env, ctx);
+              break;
+            }
+            case op_t::MUL: {
+              ret = eval_arithmetic(std::multiplies<>(), head, tail, env, ctx);
+              break;
+            }
+            case op_t::SCONCAT: {
+              ret = eval_concat(std::plus<>(), head, tail, env, ctx);
+              break;
+            }
+            case op_t::GT: {
+              ret = eval_cmp(std::greater<>(), head, tail, env, ctx);
+              break;
+            }
+            case op_t::GTE: {
+              ret = eval_cmp(std::greater_equal<>(), head, tail, env, ctx);
+              break;
+            }
+            case op_t::LT: {
+              ret = eval_cmp(std::less<>(), head, tail, env, ctx);
+              break;
+            }
+            case op_t::LTE: {
+              ret = eval_cmp(std::less_equal<>(), head, tail, env, ctx);
+              break;
+            }
+            case op_t::EQ: {
+              ret = eval_cmp(std::equal_to<>(), head, tail, env, ctx);
+              break;
+            }
+            case op_t::TYPEOF: {
+              ret = eval_typeof(head, tail, env, ctx);
+              break;
+            }
+            case op_t::EVAL: {
+              ret = eval_eval(head, tail, env, ctx);
+              break;
+            }
+            case op_t::EVALSEQ: {
+              ret = eval_evalseq(head, tail, env, ctx);
+              break;
+            }
+            case op_t::PRINT: {
+              ret = eval_print(head, tail, env, ctx);
+              break;
+            }
+            case op_t::QUOTE: {
+              ret = eval_quote(head, tail, env, ctx);
+              break;
+            }
+            case op_t::CONS: {
+              ret = eval_cons(head, tail, env, ctx);
+              break;
+            }
+            case op_t::CAR: {
+              ret = eval_car(head, tail, env, ctx);
+              break;
+            }
+            case op_t::CDR: {
+              ret = eval_cdr(head, tail, env, ctx);
+              break;
+            }
+            case op_t::COND: {
+              ret = eval_cond(head, tail, env, ctx);
+              break;
+            }
+            case op_t::LAMBDA: {
+              ret = eval_lambda(head, tail, env, ctx);
+              break;
+            }
+            case op_t::DEF: {
+              ret = eval_def(head, tail, env, ctx);
+              break;
+            }
+            case op_t::SET: {
+              ret = eval_set(head, tail, env, ctx);
+              break;
+            }
+            case op_t::GET: {
+              ret = eval_get(head, tail, env, ctx);
+              break;
+            }
+            case op_t::CALL: {
+              ret = eval_call(head, tail, env, ctx);
+              break;
+            }
+            default: {
+              ret = error("eval_lisp: unexpected '" + show(head) + "' operator");
+              break;
+            }
+          }
         },
-        [&ret, env] (const object_variable_t& var) {
-          auto res = env->getvar(var.name);
-          if (!is_error(res)) ret = res;   // Знчение может быть задано позже
+        [&ret, &head, &tail] (auto) {
+          ret = error("eval_list: unexpected '" + show(head) + "' in '" + show(cons(head, tail)) + "'");
         },
-        [&ret] (auto) {
-          ;
+    }, head);
+    return ret;
+  }
+
+  object_t eval(const object_t& object, envs_t env, context_t& ctx) {
+    DEBUG_LOGGER_TRACE_LISP;
+    if (is_error(object)) return object;
+    ctx.eval_calls++;
+    auto ret = nil();
+    std::visit(overloaded {
+        [&ret, &object] (object_nil_t) {
+          ret = object;
+        },
+        [&ret, &object] (const object_error_t&) {
+          ret = object;
+        },
+        [&ret, &object] (bool) {
+          ret = object;
+        },
+        [&ret, &object] (int64_t) {
+          ret = object;
+        },
+        [&ret, &object] (double) {
+          ret = object;
+        },
+        [&ret, &object] (const std::string&) {
+          ret = object;
+        },
+        [&ret, &object, &env] (const object_variable_t& v) {
+          ret = env->getvar(v.name);
+        },
+        [&ret, &object, env, &ctx] (object_list_sptr_t) {
+          auto p = decompose(object);
+          ret = eval_list(p.first, p.second, env, ctx);
+        },
+        [&ret, &object] (auto) {
+          ret = error("eval: unexpected '" + show(object) + "'");
         },
     }, object);
     return ret;
@@ -776,138 +958,66 @@ int main() {
   auto env = std::make_shared<env_t>();
 
   {
-    auto l = atom_bool(true);
-    assert(is_error(car(l)));
-    assert(is_error(cdr(l)));
-    assert(show(l) == R"LISP(true)LISP");
-    assert(show_struct(l) == R"LISP(B:true )LISP");
-    assert(show_struct(car(l)) == R"LISP(E:"decompose: unexpected 'true', expected list" )LISP");
-    assert(show_struct(cdr(l)) == R"LISP(E:"decompose: unexpected 'true', expected list" )LISP");
-    assert(show(car(l)) == R"LISP(E:"decompose: unexpected 'true', expected list")LISP");
-    assert(show(cdr(l)) == R"LISP(E:"decompose: unexpected 'true', expected list")LISP");
-  }
-
-  {
-    auto l = nil();
-    assert(is_nil(l));
-    assert(is_error(car(l)));
-    assert(is_error(cdr(l)));
-    assert(show(l) == R"LISP(())LISP");
-    assert(show_struct(l) == R"LISP(nil )LISP");
-    assert(show(car(l)) == R"LISP(E:"decompose: unexpected '()', expected list")LISP");
-    assert(show(cdr(l)) == R"LISP(E:"decompose: unexpected '()', expected list")LISP");
-  }
-
-  {
-    auto l = cons(atom_bool(false), nil());
-    assert(show(l) == R"LISP((false))LISP");
-    assert(show_struct(l) == R"LISP(LIST ( B:false ) ( nil ) )LISP");
-    assert(show_struct(car(l)) == R"LISP(B:false )LISP");
-    assert(show_struct(cdr(l)) == R"LISP(nil )LISP");
-  }
-
-  {
-    auto l = cons(
-        atom_bool(true),
-        cons(
-          nil(),
-          cons(
-            atom_int(15),
-            cons(
-              atom_double(1.23),
-              cons(
-                atom_string("my string"),
-                cons(
-                  atom_variable("my_int1"),
-                  nil()))))));
-    assert(show(l) == R"LISP((true () 15 1.230000 "my string" my_int1))LISP");
-    assert(show_struct(l) == R"LISP(LIST ( B:true ) ( LIST ( nil ) ( LIST ( I:15 ) ( LIST ( D:1.230000 ) ( LIST ( S:"my string" ) ( LIST ( V:my_int1 ) ( nil ) ) ) ) ) ) )LISP");
-  }
-
-  {
-    std::string str = R"LISP((1 (2.3 var2) "my str"))LISP";
-    auto l = parse(str);
-    assert(show(l) == R"LISP((1 (2.300000 var2) "my str"))LISP");
-    assert(show_struct(l) == R"LISP(LIST ( I:1 ) ( LIST ( LIST ( D:2.300000 ) ( LIST ( V:var2 ) ( nil ) ) ) ( LIST ( S:"my str" ) ( nil ) ) ) )LISP");
-  }
-
-  {
-    std::string str = R"LISP(1 (2.3 var2) "my str")LISP";
-    auto l = parse(str);
-    assert(show(l) == R"LISP((1 (2.300000 var2) "my str"))LISP");
-    assert(show_struct(l) == R"LISP(LIST ( I:1 ) ( LIST ( LIST ( D:2.300000 ) ( LIST ( V:var2 ) ( nil ) ) ) ( LIST ( S:"my str" ) ( nil ) ) ) )LISP");
-  }
-
-  {
-    std::string str = R"LISP(abc)LISP";
-    auto l = parse(str);
-    assert(show(l) == R"LISP((abc))LISP");
-    assert(show_struct(l) == R"LISP(LIST ( V:abc ) ( nil ) )LISP");
-  }
-
-  {
-    std::string str = R"LISP(  a b (0 (1) 2 ((3) 4) 5 6 () 7))LISP";
-    auto l = parse(str);
-    assert(show(l) == R"LISP((a b (0 (1) 2 ((3) 4) 5 6 () 7)))LISP");
-  }
-
-  {
-    assert(show(eval(parse(R"LISP((+ 10 1 2 3))LISP"), env)) == R"LISP(16)LISP");
-    assert(show(eval(parse(R"LISP((- 10 1 2 3))LISP"), env)) == R"LISP(4)LISP");
-    assert(show(eval(parse(R"LISP((- 10 1.0 2 3))LISP"), env)) == R"LISP(4.000000)LISP");
-    assert(show(eval(parse(R"LISP((* 10 1 2 3))LISP"), env)) == R"LISP(60)LISP");
-    assert(show(eval(parse(R"LISP((/ 10 1 2 3))LISP"), env)) == R"LISP(1)LISP");
-    assert(show(eval(parse(R"LISP((/ 10.0 1 2 3))LISP"), env)) == R"LISP(1.666667)LISP");
-    assert(show(eval(parse(R"LISP((% 100 3 3))LISP"), env)) == R"LISP(1)LISP");
-    assert(show(eval(parse(R"LISP((++ "a" "b" "c"))LISP"), env)) == R"LISP("abc")LISP");
-  }
-
-  {
-    assert(show(eval(parse(R"LISP((> 2 1))LISP"), env)) == R"LISP(true)LISP");
-    assert(show(eval(parse(R"LISP((> 2 1 0))LISP"), env)) == R"LISP(true)LISP");
-    assert(show(eval(parse(R"LISP((> 2 1 0 5))LISP"), env)) == R"LISP(false)LISP");
-    assert(show(eval(parse(R"LISP((> 2))LISP"), env)) == R"LISP(true)LISP");
-    assert(show(eval(parse(R"LISP((> 2.0 5))LISP"), env)) == R"LISP(false)LISP");
-    assert(show(eval(parse(R"LISP((> 9 8 7 -2 -3 (+ 1 -9)))LISP"), env)) == R"LISP(true)LISP");
-    assert(show(eval(parse(R"LISP((> 9 8 7 -3 -3 (+ 1 -9)))LISP"), env)) == R"LISP(false)LISP");
-    assert(show(eval(parse(R"LISP((>= 9 8 7 -3 -3 (+ 1 -9)))LISP"), env)) == R"LISP(true)LISP");
-    assert(show(eval(parse(R"LISP((>= 2.0 2))LISP"), env)) == R"LISP(true)LISP");
-    assert(show(eval(parse(R"LISP((>= 2 2.0))LISP"), env)) == R"LISP(true)LISP");
-    assert(show(eval(parse(R"LISP((< 1 2 6))LISP"), env)) == R"LISP(true)LISP");
-    assert(show(eval(parse(R"LISP((< 1 2 6 6))LISP"), env)) == R"LISP(false)LISP");
-    assert(show(eval(parse(R"LISP((<= 1 2 6 6))LISP"), env)) == R"LISP(true)LISP");
-    assert(show(eval(parse(R"LISP((== (+ 1 2) 3 (- 10 7) 3.))LISP"), env)) == R"LISP(true)LISP");
-    assert(show(eval(parse(R"LISP((== (+ 1 2) 3 (- 10 7) 3. 1))LISP"), env)) == R"LISP(false)LISP");
-    assert(show(eval(parse(R"LISP((!= 1 2 6))LISP"), env)) == R"LISP(true)LISP");
-    assert(show(eval(parse(R"LISP((!= 1 2 2))LISP"), env)) == R"LISP(false)LISP");
-  }
-
-  {
-    assert(show(eval(parse(R"LISP((quote (+ 1 2) 3 4))LISP"), env)) == R"LISP(((+ 1 2) 3 4))LISP");
-    assert(show(eval(parse(R"LISP((typeof (+ 1 2)))LISP"), env)) == R"LISP("int")LISP");
-    assert(show(eval(parse(R"LISP((typeof (quote (+ 1 2))))LISP"), env)) == R"LISP("list")LISP");
-    assert(show(eval(parse(R"LISP((cons 0 1 (+ 1 1) (quote 3 4)))LISP"), env)) == R"LISP((0 1 2 (3 4)))LISP");
-    assert(show(eval(parse(R"LISP(car (cons 0 1 (+ 1 1) (quote 3 4)))LISP"), env)) == R"LISP(0)LISP");
-    assert(show(eval(parse(R"LISP(cdr (cons 0 1 (+ 1 1) (quote 3 4)))LISP"), env)) == R"LISP((1 2 (3 4)))LISP");
-    assert(show(eval(parse(R"LISP((+ 1 2)(* 10 2)(+ 5 2))LISP"), env)) == R"LISP(7)LISP");
-    assert(show(eval(parse(R"LISP(1 2 3)LISP"), env)) == R"LISP(3)LISP");
-    assert(show(eval(parse(R"LISP((cond (> 2 2) ("a") (true) ("b") ))LISP"), env)) == R"LISP("b")LISP");
-  }
-
-  {
-    assert(show(eval(parse(R"LISP((def a 1) (+ a 1))LISP"), env)) == R"LISP(2)LISP");
-    assert(show(eval(parse(R"LISP((def a (quote 1 2 3)) (get a))LISP"), env)) == R"LISP((1 2 3))LISP");
-    assert(show(eval(parse(R"LISP((def a 1) (set! a (+ a 1)) (get a))LISP"), env)) == R"LISP(2)LISP");
-    assert(show(eval(parse(R"LISP((def f (lambda (x) (cond (> x 0) (* x (f (- x 1))) (true) (1)))) (f 1))LISP"), env)) == R"LISP(1)LISP");
-    assert(show(eval(parse(R"LISP((f -1))LISP"), env)) == R"LISP(1)LISP");
-    assert(show(eval(parse(R"LISP((f 5))LISP"), env)) == R"LISP(120)LISP");
-    assert(show(eval(parse(R"LISP((f 10))LISP"), env)) == R"LISP(3628800)LISP");
-  }
-
-  {
-    std::cout << "output: '" << show(eval(parse(R"LISP((def f (lambda (x) (cond (> x 0) (* x (f (- x 1))) (true) (1) ))) (f 1))LISP"), env)) << "'" << std::endl;
-    // std::cout << "output: '" << show(eval(parse(R"LISP((cond (> 2 2) ("a") (true) ("b") ))LISP"), env)) << "'" << std::endl;
+    // std::cout << "output: '" << show(eval(parse(R"LISP((def s 0) (def f (lambda (x) (cond (> x s) (* x (f (- x 1))) (true) (1) ))) (def y 5) (f y))LISP"), env)) << "'" << std::endl;
+    // std::cout << "output: '" << show(eval(parse(R"LISP((def fib (lambda (x) (cond (> x 1) (+ (fib (- x 1)) (fib (- x 2))) (true) (1) ))) (fib 4))LISP"), env)) << "'" << std::endl;
     // eval(parse(R"LISP((def a 1) (print a))LISP"));
+  }
+
+
+
+  {
+    context_t ctx;
+
+    assert(show(eval(parse(R"LISP((+ (+ 5 5 1) 1 2 3 (+ 10)))LISP"), env, ctx)) == R"LISP(27)LISP");
+    assert(show(eval(parse(R"LISP((+ (+ 5 5 1) 1 2.0 3 (+ 10)))LISP"), env, ctx)) == R"LISP(27.000000)LISP");
+
+    assert(show(eval(parse(R"LISP((< (+ 0 1) 2.0 3 (+ 10)))LISP"), env, ctx)) == R"LISP(true)LISP");
+    assert(show(eval(parse(R"LISP((< (+ 0 1) 2 3 (+ 10)))LISP"), env, ctx)) == R"LISP(true)LISP");
+    assert(show(eval(parse(R"LISP((< "a" (++ "a" "b") "c"))LISP"), env, ctx)) == R"LISP(true)LISP");
+    assert(show(eval(parse(R"LISP((< "a" (++ "a") "c"))LISP"), env, ctx)) == R"LISP(false)LISP");
+
+    assert(show(eval(parse(R"LISP((quote (+ 1 2)))LISP"), env, ctx)) == R"LISP((+ 1 2))LISP");
+    assert(show(eval(parse(R"LISP((quote (+ 1 2)))LISP"), env, ctx)) == R"LISP((+ 1 2))LISP");
+    assert(show(eval(parse(R"LISP((quote))LISP"), env, ctx))
+        == R"LISP(E:"quote: expected argument in '(quote)'")LISP");
+    assert(show(eval(parse(R"LISP((quote (1) (2)))LISP"), env, ctx))
+        == R"LISP(E:"quote: wrong argument '(2)', too many arguments in '(quote (1) (2))'")LISP");
+
+    assert(show(eval(parse(R"LISP((cons 10 (quote (11))))LISP"), env, ctx)) == R"LISP((10 11))LISP");
+    assert(show(eval(parse(R"LISP((cons 10 11))LISP"), env, ctx))
+        == R"LISP(E:"cons: unexpected '11', expected list or nil in '11'")LISP");
+    assert(show(eval(parse(R"LISP((cons))LISP"), env, ctx))
+        == R"LISP(E:"cons: expected argument (1) in '(cons)'")LISP");
+    assert(show(eval(parse(R"LISP((cons 10))LISP"), env, ctx))
+        == R"LISP(E:"cons: expected argument (2) in '(cons 10)'")LISP");
+    assert(show(eval(parse(R"LISP((cons 10 (11) (12)))LISP"), env, ctx))
+        == R"LISP(E:"cons: wrong argument (3) '(12)', too many arguments in '(cons 10 (11) (12))'")LISP");
+
+    assert(show(eval(parse(R"LISP((car (quote (11))))LISP"), env, ctx)) == R"LISP(11)LISP");
+    assert(show(eval(parse(R"LISP((car (quote (11 12))))LISP"), env, ctx)) == R"LISP(11)LISP");
+    assert(show(eval(parse(R"LISP((car))LISP"), env, ctx))
+        == R"LISP(E:"car: expected argument (1) in '(car)'")LISP");
+    assert(show(eval(parse(R"LISP((car 1 2))LISP"), env, ctx))
+        == R"LISP(E:"car: wrong argument (2) '2', too many arguments in '(car 1 2)'")LISP");
+
+    assert(show(eval(parse(R"LISP((cdr (quote (11))))LISP"), env, ctx)) == R"LISP(())LISP");
+    assert(show(eval(parse(R"LISP((cdr (quote (11 12))))LISP"), env, ctx)) == R"LISP((12))LISP");
+    assert(show(eval(parse(R"LISP((cdr))LISP"), env, ctx))
+        == R"LISP(E:"cdr: expected argument (1) in '(cdr)'")LISP");
+    assert(show(eval(parse(R"LISP((cdr 1 2))LISP"), env, ctx))
+        == R"LISP(E:"cdr: wrong argument (2) '2', too many arguments in '(cdr 1 2)'")LISP");
+
+    assert(show(eval(parse(R"LISP((typeof (+ 1 2)))LISP"), env, ctx)) == R"LISP("int")LISP");
+    assert(show(eval(parse(R"LISP((typeof (quote (+ 1 2))))LISP"), env, ctx)) == R"LISP("list")LISP");
+
+    assert(show(eval(parse(R"LISP((cond (false (eval "a")) (true (eval "b")) (true (eval "c"))))LISP"), env, ctx)) == R"LISP("b")LISP");
+
+    assert(show(eval(parse(R"LISP((evalseq (def a 10) (set! a 11) (+ 1 2) (get a)))LISP"), env, ctx))
+        == R"LISP((10 11 3 11))LISP");
+    assert(show(eval(parse(R"LISP((evalseq (def f (lambda (x) (cond ((> x 0) (* x (call f (- x 1)))) (true 1)))) (call f 5)))LISP"), env, ctx))
+        == R"LISP(((lamdba (x) (cond ((> x 0) (* x (call f (- x 1)))) (true 1))) 120))LISP");
+    assert(show(eval(parse(R"LISP((evalseq (def f (lambda (x y z) (+ x y z))) (call f 1 (* 4 5) 10)))LISP"), env, ctx))
+        == R"LISP(((lamdba (x y z) (+ x y z)) 31))LISP");
   }
 
 
@@ -919,9 +1029,12 @@ int main() {
       std::cout << "lisp $ ";
       std::getline(std::cin, str);
       if (str == "") break;
-      auto l = parse(str);
-      std::cout << "struct: \t'" << show_struct(l) << "'" << std::endl;
-      std::cout << "eval:   \t'" << show(eval(l, env)) << "'" << std::endl;
+      context_t ctx;
+      auto l = eval(parse(str), env, ctx);
+      std::cout << "result: \t" << show(l) << std::endl;
+      std::cout << "eval_calls: \t" << ctx.eval_calls << std::endl;
+      std::cout << "stream: \t" << ctx.stream.str() << std::endl;
+      // std::cout << "eval:   \t'" << show(eval(l, env)) << "'" << std::endl;
     }
   }
 
