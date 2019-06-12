@@ -50,6 +50,9 @@ namespace lisp_interpreter {
   struct object_lambda_t;
   using object_lambda_sptr_t = std::shared_ptr<const object_lambda_t>;
 
+  struct object_macro_t;
+  using object_macro_sptr_t = std::shared_ptr<const object_macro_t>;
+
   struct object_list_t;
   using object_list_sptr_t = std::shared_ptr<const object_list_t>;
 
@@ -133,6 +136,7 @@ namespace lisp_interpreter {
     op_t,                  // operator
     object_variable_t,     // symbols
     object_lambda_sptr_t,  // lambda
+    object_macro_sptr_t,   // macro
     object_list_sptr_t     // list
     // object_map_sptr_t,  // map   // TODO
     // object_array_sptr_t // array // TODO
@@ -148,6 +152,14 @@ namespace lisp_interpreter {
 
     object_lambda_t(const object_t& args, const object_t& body, envs_t env)
         : args(args), body(body), env(env) { }
+  };
+
+  struct object_macro_t {
+    object_t args;
+    object_t body;
+
+    object_macro_t(const object_t& args, const object_t& body)
+        : args(args), body(body) { }
   };
 
   struct object_list_t {
@@ -235,6 +247,10 @@ namespace lisp_interpreter {
     return std::make_shared<object_lambda_t>(args, body, env);
   }
 
+  object_t macro(const object_t& args, const object_t& body) {
+    return std::make_shared<object_macro_t>(args, body);
+  }
+
   object_t list(const object_t& head, const object_t& tail) {
     return std::make_shared<object_list_t>(head, tail);
   }
@@ -269,6 +285,10 @@ namespace lisp_interpreter {
 
   const object_lambda_sptr_t* as_atom_lambda(const object_t& object) {
     return std::get_if<object_lambda_sptr_t>(&object);
+  }
+
+  const object_macro_sptr_t* as_atom_macro(const object_t& object) {
+    return std::get_if<object_macro_sptr_t>(&object);
   }
 
   const object_list_sptr_t* as_atom_list(const object_t& object) {
@@ -439,6 +459,9 @@ namespace lisp_interpreter {
         },
         [&str] (object_lambda_sptr_t v) {
           str += "(lamdba " + show(v->args) + " " + show(v->body) + ")";
+        },
+        [&str] (object_macro_sptr_t v) {
+          str += "(macro " + show(v->args) + " " + show(v->body) + ")";
         },
         [&str, &object] (object_list_sptr_t) {
           str += "(";
@@ -678,6 +701,7 @@ namespace lisp_interpreter {
       [&type] (op_t)                 { type = "operator"; },
       [&type] (object_variable_t)    { type = "variable"; },
       [&type] (object_lambda_sptr_t) { type = "lambda"; },
+      [&type] (object_macro_sptr_t)  { type = "macro"; },
       [&type] (object_list_sptr_t)   { type = "list"; },
     }, curr);
     return atom_string(type);
@@ -722,6 +746,18 @@ namespace lisp_interpreter {
           + "', too many arguments in '" + show(cons(head, tail)) + "'");
     auto body = p.first;
     return lambda(args, body, env);
+  }
+
+  object_t eval_macro(const object_t& head, const object_t& tail, envs_t, context_t&) {
+    if (is_nil(tail)) return error("macro: expected argument (1) in '" + show(cons(head, tail)) + "'");
+    auto p = decompose(tail);
+    if (is_nil(p.second)) return error("macro: expected argument (2) in '" + show(cons(head, tail)) + "'");
+    auto args = p.first;
+    p = decompose(p.second);
+    if (!is_nil(p.second)) return error("macro: wrong argument (3) '" + show(car(p.second))
+          + "', too many arguments in '" + show(cons(head, tail)) + "'");
+    auto body = p.first;
+    return macro(args, body);
   }
 
   object_t eval_def(const object_t& head, const object_t& tail, envs_t env, context_t& ctx) {
@@ -776,8 +812,6 @@ namespace lisp_interpreter {
     if (!as_atom_variable(p.first)) return error("call: expected variable (1) in '" + show(cons(head, tail)) + "'");
     auto var = *as_atom_variable(p.first);
     auto args = p.second;
-    // DEBUG_LOGGER_LISP("var: %s", show(var).c_str());
-    // DEBUG_LOGGER_LISP("args: %s", show(args).c_str());
 
     auto ofun = env->getvar(var.name);
     if (!as_atom_lambda(ofun)) return error("call: unexpected '" + show(ofun) + "', expected lambda");
@@ -878,6 +912,14 @@ namespace lisp_interpreter {
             }
             case op_t::LAMBDA: {
               ret = eval_lambda(head, tail, env, ctx);
+              break;
+            }
+            case op_t::MACRO: {
+              ret = eval_macro(head, tail, env, ctx);
+              break;
+            }
+            case op_t::MACROEXPAND: {
+              ret = eval_macroexpand(head, tail, env, ctx);
               break;
             }
             case op_t::DEF: {
