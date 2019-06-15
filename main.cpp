@@ -80,10 +80,13 @@ int main() {
 
     assert(show(eval(parse(R"LISP((evalseq (def a 10) (set! a 11) (+ 1 2) (get a)))LISP"), env, ctx))
         == R"LISP((10 11 3 11))LISP");
-    assert(show(eval(parse(R"LISP((evalseq (def f (lambda (x) (cond ((> x 0) (* x (call f (- x 1)))) (true 1)))) (call f 5)))LISP"), env, ctx))
-        == R"LISP(((lamdba (x) (cond ((> x 0) (* x (call f (- x 1)))) (true 1))) 120))LISP");
-    assert(show(eval(parse(R"LISP((evalseq (def f (lambda (x y z) (+ x y z))) (call f 1 (* 4 5) 10)))LISP"), env, ctx))
+    assert(show(eval(parse(R"LISP((evalseq (def f (lambda (x) (cond ((> x 0) (* x (f (- x 1)))) (true 1)))) (f 5)))LISP"), env, ctx))
+        == R"LISP(((lamdba (x) (cond ((> x 0) (* x (f (- x 1)))) (true 1))) 120))LISP");
+    assert(show(eval(parse(R"LISP((evalseq (def f (lambda (x y z) (+ x y z))) (f 1 (* 4 5) 10)))LISP"), env, ctx))
         == R"LISP(((lamdba (x y z) (+ x y z)) 31))LISP");
+
+    assert(show(eval(parse(R"LISP(evalseq (def msum (macro (x y z) (+ x y z))) (macroexpand msum (+ 0 1 2) x 3))LISP"), env, ctx))
+        == R"LISP(((macro (x y z) (+ x y z)) (+ (+ 0 1 2) x 3)))LISP");
   }
 
 

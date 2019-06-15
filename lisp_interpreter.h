@@ -801,31 +801,66 @@ namespace lisp_interpreter {
     return env->getvar(pvar->name);
   }
 
-  object_t eval_call(const object_t& head, const object_t& tail, envs_t env, context_t& ctx) {
-    if (is_nil(tail)) return error("call: expected argument (1) in '" + show(cons(head, tail)) + "'");
+  object_t eval_variable(const object_t& head, const object_t& tail, envs_t env, context_t& ctx) {
+    if (is_nil(tail)) return error("eval_variable: expected argument (1) in '" + show(cons(head, tail)) + "'");
     auto p = decompose(tail);
-    // if (is_nil(p.second)) return error("call: expected argument (2) in '" + show(cons(head, tail)) + "'");
-    if (!as_atom_variable(p.first)) return error("call: expected variable (1) in '" + show(cons(head, tail)) + "'");
+    if (!as_atom_variable(p.first)) return error("eval_variable: expected variable (1) in '" + show(cons(head, tail)) + "'");
     auto var = *as_atom_variable(p.first);
     auto args = p.second;
 
     auto ofun = env->getvar(var.name);
-    if (!as_atom_lambda(ofun)) return error("call: unexpected '" + show(ofun) + "', expected lambda");
-    auto fun = *as_atom_lambda(ofun);
-    auto fargs = fun->args;
+    if (!as_atom_lambda(ofun) && !as_atom_macro(ofun)) {
+      return error("eval_variable: unexpected '" + show(ofun) + "', expected lambda or macro");
+    }
 
-    auto env_args = std::make_shared<env_t>(fun->env);
+    bool is_lambda = as_atom_lambda(ofun);
+    auto fargs = is_lambda
+      ? ((*as_atom_lambda(ofun))->args)
+      : ((*as_atom_macro(ofun))->args);
+    auto env_args = is_lambda
+      ? std::make_shared<env_t>((*as_atom_lambda(ofun))->env)
+      : std::make_shared<env_t>();
+
     while (!is_nil(fargs)) {
       auto pf = decompose(fargs);
       auto pa = decompose(args);
       auto *parg = as_atom_variable(pf.first);
-      if (!parg) return error("eval_call: unexpected '" + show(pf.first) + "', expected variable");
-      env_args->defvar(parg->name, eval(pa.first, env, ctx));
+      if (!parg) return error("eval_variable: unexpected '" + show(pf.first) + "', expected variable");
+      auto var = is_lambda
+        ? eval(pa.first, env, ctx)
+        : pa.first;
+      env_args->defvar(parg->name, var);
       fargs = pf.second;
       args  = pa.second;
     }
 
-    return eval(fun->body, env_args, ctx);
+    if (is_lambda)
+      return eval(((*as_atom_lambda(ofun))->body), env_args, ctx);
+
+    auto macroexpand = [](const object_t& object, envs_t env, auto f) -> object_t {
+      object_t ret = object;
+      std::visit(overloaded {
+        [&ret, &env] (const object_variable_t& v) {
+          auto obj = env->getvar(v.name);
+          if (!is_error(obj)) ret = obj;
+        },
+        [&ret, &object, &env, &f] (object_list_sptr_t) {
+          auto ret_local = nil();
+          for_each(object, [&env, &f, &ret_local](const object_t& object) -> bool {
+            auto curr = f(object, env, f);
+            ret_local = cons(curr, ret_local);
+            return true;
+          });
+          ret = reverse(ret_local, false);
+        },
+        [] (const auto&) {
+          ;
+        }
+      }, object);
+      return ret;
+    };
+
+    return macroexpand(((*as_atom_macro(ofun))->body), env_args, macroexpand);
   }
 
   object_t eval_list(const object_t& head, const object_t& tail, envs_t env, context_t& ctx) {
@@ -914,10 +949,10 @@ namespace lisp_interpreter {
               ret = eval_macro(head, tail, env, ctx);
               break;
             }
-            /*case op_t::MACROEXPAND: {
-              ret = eval_macroexpand(head, tail, env, ctx);
+            case op_t::MACROEXPAND: {
+              ret = eval_variable(head, tail, env, ctx);
               break;
-            }*/
+            }
             case op_t::DEF: {
               ret = eval_def(head, tail, env, ctx);
               break;
@@ -930,17 +965,16 @@ namespace lisp_interpreter {
               ret = eval_get(head, tail, env, ctx);
               break;
             }
-            case op_t::CALL: {
-              ret = eval_call(head, tail, env, ctx);
-              break;
-            }
             default: {
               ret = error("eval_lisp: unexpected '" + show(head) + "' operator");
               break;
             }
           }
         },
-        [&ret, &head, &tail] (auto) {
+        [&ret, &head, &tail, &env, &ctx] (const object_variable_t&) {
+          ret = eval_variable(nil(), cons(head, tail), env, ctx);
+        },
+        [&ret, &head, &tail] (const auto&) {
           ret = error("eval_list: unexpected '" + show(head) + "' in '" + show(cons(head, tail)) + "'");
         },
     }, head);
@@ -978,7 +1012,7 @@ namespace lisp_interpreter {
           auto p = decompose(object);
           ret = eval_list(p.first, p.second, env, ctx);
         },
-        [&ret, &object] (auto) {
+        [&ret, &object] (const auto&) {
           ret = error("eval: unexpected '" + show(object) + "'");
         },
     }, object);
