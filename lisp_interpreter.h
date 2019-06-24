@@ -616,16 +616,14 @@ namespace lisp_interpreter {
     if (!as_atom_int(ret) && !as_atom_double(ret)) return error("eval_arithmetic: unexpected '" + show(ret) + "' in '" + show(cons(head, tail)) + "'");
     for_each(p.second, [&ret, &op, &head, &tail, &env, &ctx](const object_t& object) -> bool {
       auto curr = eval(object, env, ctx);
-      if (as_atom_int(ret) && as_atom_int(curr)) {
-        ret = op(*as_atom_int(ret), *as_atom_int(curr));
-      } else if (as_atom_int(ret) && as_atom_double(curr)) {
-        ret = op(static_cast<double>(*as_atom_int(ret)), *as_atom_double(curr));
-      } else if (as_atom_double(ret) && as_atom_int(curr)) {
-        ret = op(*as_atom_double(ret), static_cast<double>(*as_atom_int(curr)));
-      } else {
-        ret = error("eval_arithmetic: unexpected '" + show(curr) + "' in '" + show(cons(head, tail)) + "'");
-        return false;
-      }
+      std::visit(overloaded{
+        [&ret, &op] (double  x, double  y) { ret = op(x, y); },
+        [&ret, &op] (int64_t x, int64_t y) { ret = op(x, y); },
+        [&ret, &op] (int64_t x, double  y) { ret = op(x, y); },
+        [&ret, &op] (double  x, int64_t y) { ret = op(x, y); },
+        [&ret, &op, &head, &tail] (auto, auto) { ret = error("eval_arithmetic: expected int or double in '" + show(cons(head, tail)) + "'"); },
+      }, ret, curr);
+      if (is_error(ret)) return false;
       return true;
     });
     return ret;
@@ -655,21 +653,17 @@ namespace lisp_interpreter {
     auto ret = atom_bool(true);
     for_each(p.second, [&acc, &ret, &op, &head, &tail, &env, &ctx](const object_t& object) -> bool {
       auto curr = eval(object, env, ctx);
+
       bool b = true;
-      if (as_atom_int(acc) && as_atom_int(curr)) {
-        b = op(*as_atom_int(acc), *as_atom_int(curr));
-      } else if (as_atom_double(acc) && as_atom_double(curr)) {
-        b = op(*as_atom_double(acc), *as_atom_double(curr));
-      } else if (as_atom_int(acc) && as_atom_double(curr)) {
-        ret = op(static_cast<double>(*as_atom_int(acc)), *as_atom_double(curr));
-      } else if (as_atom_double(acc) && as_atom_int(curr)) {
-        ret = op(*as_atom_double(acc), static_cast<double>(*as_atom_int(curr)));
-      } else if (as_atom_string(acc) && as_atom_string(curr)) {
-        b = op(*as_atom_string(acc), *as_atom_string(curr));
-      } else {
-        ret = error("eval_cmp: unexpected '" + show(curr) + "' in '" + show(cons(head, tail)) + "'");
-        return false;
-      }
+      std::visit(overloaded{
+        [&b, &op] (double  x, double  y) { b = op(x, y); },
+        [&b, &op] (int64_t x, int64_t y) { b = op(x, y); },
+        [&b, &op] (int64_t x, double  y) { b = op(x, y); },
+        [&b, &op] (double  x, int64_t y) { b = op(x, y); },
+        [&b, &op] (const std::string& x, const std::string& y) { b = op(x, y); },
+        [&b, &op, &ret, &head, &tail] (auto, auto) { ret = error("eval_cmp: error in '" + show(cons(head, tail)) + "'"); },
+      }, acc, curr);
+      if (is_error(ret)) return false;
       if (!b) {
         ret = atom_bool(false);
         return false;
