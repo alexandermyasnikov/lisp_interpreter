@@ -1,0 +1,15 @@
+
+(+ 1 2)
+
+
+
+
+(def sum (lambda (x y z) (+ x (+ y z))))
+(def a (sum 10 (+ 10 1) (+ 10 2)))
+(println (+ 1 2))
+(println (sum 1 2 3))
+(println (sum 11 22 33))
+
+
+
+

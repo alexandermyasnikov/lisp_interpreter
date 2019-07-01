@@ -104,7 +104,7 @@ int main() {
         static bool init = true;
         if (init) {
           init = false;
-          str = "(:load 'demo.lispam)";
+          str = "(:load 'std.lispam)";
         } else {
           std::getline(std::cin, str);
         }
