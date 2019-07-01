@@ -24,14 +24,17 @@ int main() {
   auto env = std::make_shared<env_t>();
 
   {
-    // std::cout << "output: '" << show(eval(parse(R"LISP((def s 0) (def f (lambda (x) (cond (> x s) (* x (f (- x 1))) (true) (1) ))) (def y 5) (f y))LISP"), env)) << "'" << std::endl;
-    // std::cout << "output: '" << show(eval(parse(R"LISP((def fib (lambda (x) (cond (> x 1) (+ (fib (- x 1)) (fib (- x 2))) (true) (1) ))) (fib 4))LISP"), env)) << "'" << std::endl;
+    context_t ctx;
+    // std::cout << "output: '" << show(parse(R"LISP((+ 1 2) (+ 3 4))LISP")) << "'" << std::endl;
+    // std::cout << "output: '" << show(eval(parse(R"LISP((+ 1 2) (+ 3 4) 5)LISP"), env, ctx)) << "'" << std::endl;
+    // std::cout << "output: '" << show(eval(parse(R"LISP(:load 'demo.lispam)LISP"), env, ctx)) << "'" << std::endl;
+    // std::cout << "output: '" << show(parse(R"LISP((1 2 3))LISP")) << "'" << std::endl;
     // eval(parse(R"LISP((def a 1) (print a))LISP"));
   }
 
 
 
-  {
+  /*{
     context_t ctx;
 
     assert(show(eval(parse(R"LISP((+ (+ 5 5 1) 1 2 3 (+ 10)))LISP"), env, ctx)) == R"LISP(27)LISP");
@@ -87,7 +90,7 @@ int main() {
 
     assert(show(eval(parse(R"LISP(evalseq (def msum (macro (x y z) (+ x y z))) (macroexpand msum (+ 0 1 2) x 3))LISP"), env, ctx))
         == R"LISP(((macro (x y z) (+ x y z)) (+ (+ 0 1 2) x 3)))LISP");
-  }
+  }*/
 
 
 
@@ -95,15 +98,30 @@ int main() {
   {
     std::string str;
     while (true) {
-      std::cout << "lisp $ ";
-      std::getline(std::cin, str);
-      if (str == "") break;
-      context_t ctx;
-      auto l = eval(parse(str), env, ctx);
-      std::cout << "result: \t" << show(l) << std::endl;
-      std::cout << "eval_calls: \t" << ctx.eval_calls << std::endl;
-      std::cout << "stream: \t" << ctx.stream.str() << std::endl;
-      // std::cout << "eval:   \t'" << show(eval(l, env)) << "'" << std::endl;
+      try {
+        std::cout << "lisp $ ";
+
+        static bool init = true;
+        if (init) {
+          init = false;
+          str = "(:load 'demo.lispam)";
+        } else {
+          std::getline(std::cin, str);
+        }
+
+        if (str == "") break;
+        context_t ctx;
+        auto l = parse(str);
+        std::cout << "input: \t" << show(l) << std::endl;
+        l = eval(l, env, ctx);
+        std::cout << "result: \t" << show(l) << std::endl;
+        std::cout << "eval_calls: \t" << ctx.eval_calls << std::endl;
+        std::cout << "stream: \t" << ctx.stream.str() << std::endl;
+      } catch (const std::exception& e) {
+        std::cout << "exception: \t" << e.what() << std::endl;
+      } catch (...) {
+        std::cout << "exception" << std::endl;
+      }
     }
   }
 
