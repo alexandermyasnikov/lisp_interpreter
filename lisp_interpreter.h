@@ -564,6 +564,47 @@ namespace lisp_interpreter {
     return eval(*cond_bool ? consequent : alternative, env, ctx);
   }
 
+  object_sptr_t eval_quote(object_sptr_t, object_sptr_t t, env_sptr_t, context_t&) {
+    DEBUG_LOGGER_TRACE_LISP;
+    auto p = decompose(t);
+    auto tail = p.first;
+    if (!as_nil(p.second)) throw error_t("eval_quote: unexpected '" + show(p.second) + "'");
+    return tail;
+  }
+
+  object_sptr_t eval_cons(object_sptr_t, object_sptr_t t, env_sptr_t env, context_t& ctx) {
+    DEBUG_LOGGER_TRACE_LISP;
+    auto p = decompose(t);
+    auto head = p.first;
+    p = decompose(p.second);
+    auto tail = p.first;
+    if (!as_nil(p.second)) throw error_t("eval_cons: unexpected '" + show(p.second) + "'");
+
+    head = eval(head, env, ctx);
+    tail = eval(tail, env, ctx);
+    return cons(head, tail);
+  }
+
+  object_sptr_t eval_head(object_sptr_t, object_sptr_t t, env_sptr_t env, context_t& ctx) {
+    DEBUG_LOGGER_TRACE_LISP;
+    auto p = decompose(t);
+    auto l = p.first;
+    if (!as_nil(p.second)) throw error_t("eval_head: unexpected '" + show(p.second) + "'");
+
+    l = eval(l, env, ctx);
+    return head(l);
+  }
+
+  object_sptr_t eval_tail(object_sptr_t, object_sptr_t t, env_sptr_t env, context_t& ctx) {
+    DEBUG_LOGGER_TRACE_LISP;
+    auto p = decompose(t);
+    auto l = p.first;
+    if (!as_nil(p.second)) throw error_t("eval_tail: unexpected '" + show(p.second) + "'");
+
+    l = eval(l, env, ctx);
+    return tail(l);
+  }
+
   object_sptr_t eval_lambda(object_sptr_t, object_sptr_t t, env_sptr_t env, context_t&) {
     DEBUG_LOGGER_TRACE_LISP;
     auto p = decompose(t);
@@ -653,6 +694,14 @@ namespace lisp_interpreter {
           ret = eval_println(h, t, env, ctx);
         } else if (v->value == "if") {
           ret = eval_if(h, t, env, ctx);
+        } else if (v->value == "quote") {
+          ret = eval_quote(h, t, env, ctx);
+        } else if (v->value == "cons") {
+          ret = eval_cons(h, t, env, ctx);
+        } else if (v->value == "head") {
+          ret = eval_head(h, t, env, ctx);
+        } else if (v->value == "tail") {
+          ret = eval_tail(h, t, env, ctx);
         } else if (v->value == "lambda") {
           ret = eval_lambda(h, t, env, ctx);
         } else if (v->value == ":load") {
