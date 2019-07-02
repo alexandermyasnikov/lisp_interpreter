@@ -22,29 +22,30 @@ int main() {
     auto env = std::make_shared<env_t>();
     std::string str;
     while (true) {
+      context_t ctx;
+      std::cout << "lisp $ ";
+      std::getline(std::cin, str);
+
+      if (str == ":l") {
+        env = std::make_shared<env_t>();
+        str = "(:load 'std.lispam)";
+      } else if (str == "") {
+        break;
+      }
+
       try {
-        std::cout << "lisp $ ";
-        std::getline(std::cin, str);
-
-        if (str == ":l") {
-          env = std::make_shared<env_t>();
-          str = "(:load 'std.lispam)";
-        } else if (str == "") {
-          break;
-        }
-
-        context_t ctx;
         auto l = parse(str);
         std::cout << "input: \t" << show(l) << std::endl;
         l = eval(l, env, ctx);
         std::cout << "result: \t" << show(l) << std::endl;
-        std::cout << "eval_calls: \t" << ctx.eval_calls << std::endl;
-        std::cout << "stream: \t" << ctx.stream.str() << std::endl;
       } catch (const std::exception& e) {
         std::cout << "exception: \t" << e.what() << std::endl;
       } catch (...) {
         std::cout << "exception" << std::endl;
       }
+
+      std::cout << "eval_calls: \t" << ctx.eval_calls << std::endl;
+      std::cout << "stream: \t" << ctx.stream.str() << std::endl;
     }
   }
 

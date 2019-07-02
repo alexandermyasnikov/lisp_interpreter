@@ -13,7 +13,7 @@
 
 
 #define DEBUG_LOGGER_TRACE_LISP          // DEBUG_LOGGER("lisp ", logger_indent_lisp_t::indent)
-#define DEBUG_LOGGER_LISP(...)           // DEBUG_LOG("lisp ", logger_indent_lisp_t::indent, __VA_ARGS__)
+#define DEBUG_LOGGER_LISP(...)           DEBUG_LOG("lisp ", logger_indent_lisp_t::indent, __VA_ARGS__)
 
 template <typename T>
 struct logger_indent_t { static inline int indent; };
@@ -32,6 +32,7 @@ namespace lisp_interpreter {
   // pure function
   // variable -> function
   // op -> string?
+  // cmake
 
   template<class... Ts> struct overloaded : Ts... { using Ts::operator()...; };
   template<class... Ts> overloaded(Ts...) -> overloaded<Ts...>;
@@ -43,8 +44,8 @@ namespace lisp_interpreter {
   struct object_lambda_t;
   using object_lambda_sptr_t = std::shared_ptr<const object_lambda_t>;
 
-  // struct object_macro_t;
-  // using object_macro_sptr_t = std::shared_ptr<const object_macro_t>;
+  struct object_macro_t;
+  using object_macro_sptr_t = std::shared_ptr<const object_macro_t>;
 
   struct object_list_t;
   using object_list_sptr_t = std::shared_ptr<const object_list_t>;
@@ -73,8 +74,8 @@ namespace lisp_interpreter {
     object_string_sptr_t,   // string
     object_ident_sptr_t,    // ident
     object_list_sptr_t,     // list
-    object_lambda_sptr_t    // lambda
-    // object_macro_sptr_t  // macro
+    object_lambda_sptr_t,   // lambda
+    object_macro_sptr_t     // macro
   >;
 
   using object_sptr_t = std::shared_ptr<const object_t>; // mutable in eval?
@@ -131,10 +132,10 @@ namespace lisp_interpreter {
   };
 
   struct object_macro_t {
-    object_t   args;
-    object_t   body;
+    object_sptr_t   args;
+    object_sptr_t   body;
 
-    object_macro_t(const object_t& args, const object_t& body)
+    object_macro_t(object_sptr_t args, object_sptr_t body)
         : args(args), body(body) { }
   };
 
@@ -229,10 +230,19 @@ namespace lisp_interpreter {
     return std::get_if<object_lambda_sptr_t>(object.get());
   }
 
+  object_sptr_t macro(object_sptr_t args, object_sptr_t body) {
+    auto l = std::make_shared<object_macro_t>(args, body);
+    return atom(l);
+  }
+
+  const object_macro_sptr_t* as_macro(object_sptr_t object) {
+    return std::get_if<object_macro_sptr_t>(object.get());
+  }
+
   std::pair<object_sptr_t, object_sptr_t> decompose(object_sptr_t object) {
     DEBUG_LOGGER_TRACE_LISP;
     auto list = as_list(object);
-    if (!list) throw error_t("decompose: object is not list");
+    if (!list) throw error_t("decompose: object '" + show(object) + "' is not list");
     return {(*list)->head, (*list)->tail};
   }
 
@@ -302,9 +312,9 @@ namespace lisp_interpreter {
         [&str] (object_lambda_sptr_t v) {
           str += "(lambda " + show(v->args) + " " + show(v->body) + ")";
         },
-        /*[&str] (object_macro_sptr_t v) {
+        [&str] (object_macro_sptr_t v) {
           str += "(macro " + show(v->args) + " " + show(v->body) + ")";
-        },*/
+        },
         [&str, &object] (object_list_sptr_t) {
           str += '(';
           bool is_first = true;
@@ -520,7 +530,7 @@ namespace lisp_interpreter {
     return ret;
   }
 
-  object_sptr_t eval_def(object_sptr_t, object_sptr_t t, env_sptr_t env_eval, env_sptr_t env_def, context_t& ctx) {
+  object_sptr_t eval_def(object_sptr_t, object_sptr_t t, env_sptr_t env_eval, env_sptr_t env_def, context_t& ctx, bool need_eval = true) {
     DEBUG_LOGGER_TRACE_LISP;
     auto p = decompose(t);
     auto name = p.first;
@@ -531,7 +541,7 @@ namespace lisp_interpreter {
     auto sname = as_ident(name);
     if (!sname) throw error_t("eval_def: argument #1 is not ident");
 
-    object = eval(object, env_eval, ctx); // XXX
+    if (need_eval) object = eval(object, env_eval, ctx);
 
     return env_def->defvar((*sname)->value, object);
   }
@@ -605,6 +615,31 @@ namespace lisp_interpreter {
     return tail(l);
   }
 
+  object_sptr_t eval_typeof(object_sptr_t, object_sptr_t t, env_sptr_t env, context_t& ctx) {
+    DEBUG_LOGGER_TRACE_LISP;
+    auto p = decompose(t);
+    auto l = p.first;
+    if (!as_nil(p.second)) throw error_t("eval_typeof: unexpected '" + show(p.second) + "'");
+
+    l = eval(l, env, ctx);
+
+    std::string ret;
+    std::visit(overloaded {
+      [&ret] (object_nil_sptr_t)     { ret = "nil"; },
+      [&ret] (bool)                  { ret = "bool"; },
+      [&ret] (int64_t)               { ret = "int"; },
+      [&ret] (double)                { ret = "double"; },
+      [&ret] (object_string_sptr_t)  { ret = "string"; },
+      [&ret] (object_ident_sptr_t)   { ret = "ident"; },
+      [&ret] (object_list_sptr_t)    { ret = "list"; },
+      [&ret] (object_lambda_sptr_t)  { ret = "lambda"; },
+      [&ret] (object_macro_sptr_t)   { ret = "macro"; },
+      [&ret] (auto)                  { ret = "unknown"; },
+    }, *l);
+
+    return string(ret);
+  }
+
   object_sptr_t eval_lambda(object_sptr_t, object_sptr_t t, env_sptr_t env, context_t&) {
     DEBUG_LOGGER_TRACE_LISP;
     auto p = decompose(t);
@@ -613,10 +648,22 @@ namespace lisp_interpreter {
     auto body = p.first;
     if (!as_nil(p.second)) throw error_t("eval_lambda: unexpected '" + show(p.second) + "'");
 
-    auto largs = as_list(args);
-    if (!largs) throw error_t("eval_lambda: argument #1 is not list");
+    if (!as_list(args) && !as_nil(args)) throw error_t("eval_lambda: argument #1 is not list");
 
     return lambda(args, body, env);
+  }
+
+  object_sptr_t eval_macro(object_sptr_t, object_sptr_t t, env_sptr_t, context_t&) {
+    DEBUG_LOGGER_TRACE_LISP;
+    auto p = decompose(t);
+    auto args = p.first;
+    p = decompose(p.second);
+    auto body = p.first;
+    if (!as_nil(p.second)) throw error_t("eval_macro: unexpected '" + show(p.second) + "'");
+
+    if (!as_list(args) && !as_nil(args)) throw error_t("eval_macro: argument #1 is not list");
+
+    return macro(args, body);
   }
 
   object_sptr_t eval_load(object_sptr_t, object_sptr_t t, env_sptr_t env, context_t& ctx) {
@@ -643,8 +690,6 @@ namespace lisp_interpreter {
     if (!lambda) throw error_t("eval_call_lambda: argument #0 is not lambda");
 
     auto env_lambda = std::make_shared<env_t>((*lambda)->env);
-    // DEBUG_LOGGER_LISP("args: '%s'", show((*lambda)->args).c_str());
-    // DEBUG_LOGGER_LISP("body: '%s'", show((*lambda)->body).c_str());
 
     for_each((*lambda)->args, [&t, &env, &env_lambda, &ctx](object_sptr_t object) -> bool {
       auto p = decompose(t);
@@ -658,6 +703,51 @@ namespace lisp_interpreter {
     return ret;
   }
 
+  object_sptr_t eval_call_macro(object_sptr_t h, object_sptr_t t, env_sptr_t env, context_t& ctx) {
+    DEBUG_LOGGER_TRACE_LISP;
+
+    auto macro = as_macro(h);
+    if (!macro) throw error_t("eval_call_macro: argument #0 is not macro");
+
+    auto env_macro = std::make_shared<env_t>();
+
+    for_each((*macro)->args, [&t, &env, &env_macro, &ctx](object_sptr_t object) -> bool {
+      auto p = decompose(t);
+      t = p.second;
+      auto arg = cons(object, cons(p.first, nil()));
+      auto val = eval_def(nil(), arg, env, env_macro, ctx, false);
+      return true;
+    });
+
+    auto macroexpand = [](object_sptr_t object, env_sptr_t env, auto f) -> object_sptr_t {
+      auto ret = object;
+      std::visit(overloaded {
+        [&ret, env] (object_ident_sptr_t v) {
+          try {
+            ret = env->getvar(v->value);
+          } catch (const error_t&) {
+            ;
+          }
+        },
+        [&ret, object, env, f] (object_list_sptr_t) {
+          auto ret_local = nil();
+          for_each(object, [env, f, &ret_local](object_sptr_t object) -> bool {
+            auto curr = f(object, env, f);
+            ret_local = cons(curr, ret_local);
+            return true;
+          });
+          ret = reverse(ret_local, false);
+        },
+        [] (auto) {
+          ;
+        },
+      }, *object);
+      return ret;
+    };
+
+    return macroexpand(((*macro)->body), env_macro, macroexpand);
+  }
+
   object_sptr_t eval_call(object_sptr_t h, object_sptr_t t, env_sptr_t env, context_t& ctx) {
     DEBUG_LOGGER_TRACE_LISP;
 
@@ -668,6 +758,8 @@ namespace lisp_interpreter {
 
     if (as_lambda(obj)) {
       return eval_call_lambda(obj, t, env, ctx);
+    } else if (as_macro(obj)){
+      return eval_call_macro(obj, t, env, ctx);
     }
 
     return obj;
@@ -702,8 +794,12 @@ namespace lisp_interpreter {
           ret = eval_head(h, t, env, ctx);
         } else if (v->value == "tail") {
           ret = eval_tail(h, t, env, ctx);
+        } else if (v->value == "typeof") {
+          ret = eval_typeof(h, t, env, ctx);
         } else if (v->value == "lambda") {
           ret = eval_lambda(h, t, env, ctx);
+        } else if (v->value == "macro") {
+          ret = eval_macro(h, t, env, ctx);
         } else if (v->value == ":load") {
           ret = eval_load(h, t, env, ctx);
         } else {
@@ -712,6 +808,9 @@ namespace lisp_interpreter {
       },
       [&ret, h, t, env, &ctx] (object_lambda_sptr_t) {
         ret = eval_call_lambda(h, t, env, ctx);
+      },
+      [&ret, h, t, env, &ctx] (object_macro_sptr_t) {
+        ret = eval_call_macro(h, t, env, ctx);
       },
       [&ret, h, t, env, &ctx] (auto) {
         ret = eval(h, env, ctx);
@@ -730,8 +829,9 @@ namespace lisp_interpreter {
     ctx.eval_calls++;
     auto ret = nil();
     std::visit(overloaded {
-      [&ret, object, env, &ctx] (object_ident_sptr_t) {
-        ret = eval_call(object, nil(), env, ctx);
+      [&ret, object, env, &ctx] (object_ident_sptr_t v) {
+        ret = env->getvar(v->value);
+        ret = eval(ret, env, ctx);
       },
       [&ret, object, env, &ctx] (object_list_sptr_t) {
         auto p = decompose(object);

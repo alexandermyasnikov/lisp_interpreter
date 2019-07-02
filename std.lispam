@@ -1,10 +1,10 @@
 
 
 
-(def not? (lambda (x) (if x false true)))
-(def less? (lambda (x y) (< x y)))
-(def greater? (lambda (x y) (less? y x)))
-(def equal? (lambda (x y) (= x y)))
+(def not?       (lambda (x)   (if x false true)))
+(def less?      (lambda (x y) (< x y)))
+(def greater?   (lambda (x y) (less? y x)))
+(def equal?     (lambda (x y) (= x y)))
 (def not-equal? (lambda (x y) (not (equal? x y))))
 
 (def add (lambda (x y) (if x y false)))
@@ -13,6 +13,16 @@
 (def negative (lambda (x) (- 0 x)))
 (def abs (lambda (x) (if (greater? x 0) x (negative x))))
 
+(def nil?    (lambda (x) (equal? (typeof x) 'nil)))
+(def bool?   (lambda (x) (equal? (typeof x) 'bool)))
+(def int?    (lambda (x) (equal? (typeof x) 'int)))
+(def double? (lambda (x) (equal? (typeof x) 'double)))
+(def sring?  (lambda (x) (equal? (typeof x) 'string)))
+(def ident?  (lambda (x) (equal? (typeof x) 'ident)))
+(def list?   (lambda (x) (equal? (typeof x) 'list)))
+
+(def range (lambda (a b)
+  (if (less? a b) (cons a (range (+ a 1) b)) ())))
 
 
 (def fib (lambda (x) (if (greater? x 0) (+ (fib (- x 1)) (fib (- x 2))) (1))))
@@ -20,6 +30,38 @@
 (def fib1 (lambda (x) (
   (def fib (lambda (a b x) (if (greater? x 0) (fib b (+ a b) (- x 1)) (b))))
   (fib 1 1 x))))
+
+
+(def sum (lambda (x y) (+ x y)))
+
+
+(def msum (macro (x y) (+ x y)))
+(def fsum (lambda (x y) (+ x y)))
+(def tmp4 (lambda () (msum (+ 1 2) (+ 3 4))))
+
+
+(def foldl (lambda (f acc l)
+  ((println 'test)
+  (println f)
+  (println acc)
+  (println l)
+  (println (tail l))
+  (if (nil? l) acc
+    (foldl f (f (head l) acc) (tail l))))))
+
+(def range10 (lambda () (range 0 10)))
+(def range20 (lambda () (range 0 20)))
+(def range5 (macro () (range 0 5)))
+
+(def tmp (lambda (f x y) (f x y)))
+(def tmp2 (lambda () (tmp sum 1 2)))
+(def tmp3 (foldl sum 1000 (range5 ())))
+
+
+(def help (lambda ()
+  (println 'hello)))
+
+
 
 
 
