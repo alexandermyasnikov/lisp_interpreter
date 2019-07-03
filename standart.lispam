@@ -2,9 +2,9 @@
 
 
 ; STANDART LIBRARY
+; VERSION 0.1.0
 ; AUTHOR ALEXANDER MYASNIKOV
 ; myasnikov.alexander.s@gmail.com
-; VERSION 0.1.0
 
 
 
@@ -52,7 +52,9 @@
   (println f)
   (println acc)
   (println l)
+  (println (head l))
   (println (tail l))
+  (println (nil? l))
   (if (nil? l) acc
     (foldl f (f (head l) acc) (tail l))))))
 

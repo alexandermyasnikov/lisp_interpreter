@@ -1,15 +1,14 @@
 
-(+ 1 2)
 
 
+(def foldl (lambda (f acc l)
+  (if (nil? l) acc
+    (foldl f (f (head l) acc) (tail l)))))
 
+(println (foldl sum 0 (quote (1 2 3 4 5))))
 
-(def sum (lambda (x y z) (+ x (+ y z))))
-(def a (sum 10 (+ 10 1) (+ 10 2)))
-(println (+ 1 2))
-(println (sum 1 2 3))
-(println (sum 11 22 33))
-
+(def msum (macro (x y) (+ x y)))
+(def fsum (lambda (x y) (+ x y)))
 
 
 
