@@ -28,7 +28,7 @@ int main() {
 
       if (str == ":l") {
         env = std::make_shared<env_t>();
-        str = "(:load 'std.lispam)";
+        str = "(:load \"standart.lispam\")";
       } else if (str == "") {
         break;
       }

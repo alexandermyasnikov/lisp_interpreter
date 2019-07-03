@@ -27,12 +27,12 @@ using namespace std::string_literals;
 namespace lisp_interpreter {
 
   // TODO
-  // lazy eval
+  // lazy eval, eval flag
   // memoization
   // pure function
-  // variable -> function
   // op -> string?
   // cmake
+  // variant to struct
 
   template<class... Ts> struct overloaded : Ts... { using Ts::operator()...; };
   template<class... Ts> overloaded(Ts...) -> overloaded<Ts...>;
@@ -304,7 +304,7 @@ namespace lisp_interpreter {
           str += std::to_string(v);
         },
         [&str] (object_string_sptr_t v) {
-          str += "'" + v->value;
+          str += "\"" + v->value + "\"";
         },
         [&str] (object_ident_sptr_t v) {
           str += v->value;
@@ -339,80 +339,68 @@ namespace lisp_interpreter {
   object_sptr_t parse(const std::string& str) {
     DEBUG_LOGGER_TRACE_LISP;
     std::stack<object_sptr_t> stack;
-    auto ret = nil();
+    auto it = str.begin();
+    auto ite = str.end();
+    stack.emplace(nil());
 
-    std::string value;
-    char type = 0;
-
-    auto value_process = [&value, &type, &ret, &stack]() {
-      if (!value.empty() && type) {
-        // DEBUG_LOGGER_LISP("value: '%s'", value.c_str());
-        auto obj = nil();
-        if (type == 'N') {
-          obj = atom(stol(value));
-        } else if (type == 'D') {
-          obj = atom(stod(value));
-        } else if (type == 'I') {
-          std::transform(value.begin(), value.end(), value.begin(), ::tolower);
-          if (value == "true") {
-            obj = atom(true);
-          } else if (value == "false") {
-            obj = atom(false);
-          } else {
-            obj = ident(value);
-          }
-        } else if (type == 'S') {
-          obj = string(value);
-        }
-
-        if (stack.empty()) {
-          ret = cons(obj, ret);
-        } else {
-          obj = cons(obj, stack.top());
-          stack.top().swap(obj);
-        }
-
-        value.clear();
-      }
-      type = 0;
-    };
-
-    for (const char c : str) {
-      if (c == '(') {
-        value_process();
+    while (it != ite) {
+      if (*it == '(') {
+        it++;
         stack.emplace(nil());
-      } else if (c == ')') {
-        value_process();
-        if (stack.empty()) throw error_t("parse: unexpected ')'");
+      } else if (*it == ';') {
+        it = std::find(it, ite, '\n');
+      } else if (*it == ')') {
+        it++;
+        if (stack.empty()) throw error_t("unexpected ')' on pos " + std::to_string(ite - it));
 
         auto l = stack.top();
         stack.pop();
 
-        if (!stack.empty()) {
-          l = cons(l, stack.top());
-          stack.top().swap(l);
-        } else {
-          ret = cons(l, ret);
+        if (stack.empty()) throw error_t("unexpected ')' on pos " + std::to_string(ite - it));
+
+        auto object_n = cons(l, stack.top());
+        stack.top().swap(object_n);
+
+      } else if (*it == '-' && std::isdigit(*it)) {
+        ;
+      } else if (std::isdigit(*it) || (*it == '-' && it != ite && isdigit(*(it + 1)))) {
+        auto it_origin = it;
+        it = std::find_if_not(it + 1, ite, [](auto c){
+            return std::isdigit(c) || c == '.'; });
+
+        if (std::find(it_origin, it, '.') == it) { // int64_t
+          auto value = stol(std::string(it_origin, it));
+          auto obj= cons(atom(value), stack.top());
+          stack.top().swap(obj);
+        } else { // double
+          auto value = stod(std::string(it_origin, it));
+          auto obj= cons(atom(value), stack.top());
+          stack.top().swap(obj);
         }
-      } else if (c == '\'') {
-        value_process();
-        if (!type) type = 'S';
-      } else if (c == '.') {
-        if (!type || type == 'N') type = 'D';
-        value += c;
-      } else if (std::isdigit(c)) {
-        if (!type) type = 'N';
-        value += c;
-      } else if (std::isgraph(c)) {
-        if (!type) type = 'I';
-        value += c;
+      } else if (*it == '"') {
+        auto it_origin = it;
+        it = std::find(it + 1, ite, '"');
+        if (it != ite) ++it;
+
+        auto value = std::string(it_origin + 1, it - 1);
+        auto obj= cons(string(value), stack.top());
+        stack.top().swap(obj);
+      } else if (std::isgraph(*it)) {
+        auto it_origin = it;
+        it = std::find_if_not(it, ite, [](auto c){
+            return std::isgraph(c) && c != '(' && c != ')' && c != '"'; });
+
+        auto value = std::string(it_origin, it);
+        auto obj= cons(ident(value), stack.top());
+        stack.top().swap(obj);
       } else {
-        value_process();
+        it++;
       }
     }
-    value_process();
-    if (!stack.empty()) throw error_t("parse: unexpected EOF");
-    if (as_list(ret) && as_nil(tail(ret))) ret = head(ret);
+
+    if (stack.size() != 1) throw error_t("parse: unexpected EOF");
+    auto ret = stack.top();
+    if (as_list(ret) && as_nil(tail(ret))) ret = head(ret); // XXX
     return reverse(ret);
   }
 

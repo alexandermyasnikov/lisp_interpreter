@@ -1,6 +1,13 @@
 
 
 
+; STANDART LIBRARY
+; AUTHOR ALEXANDER MYASNIKOV
+; myasnikov.alexander.s@gmail.com
+; VERSION 0.1.0
+
+
+
 (def not?       (lambda (x)   (if x false true)))
 (def less?      (lambda (x y) (< x y)))
 (def greater?   (lambda (x y) (less? y x)))
@@ -13,13 +20,13 @@
 (def negative (lambda (x) (- 0 x)))
 (def abs (lambda (x) (if (greater? x 0) x (negative x))))
 
-(def nil?    (lambda (x) (equal? (typeof x) 'nil)))
-(def bool?   (lambda (x) (equal? (typeof x) 'bool)))
-(def int?    (lambda (x) (equal? (typeof x) 'int)))
-(def double? (lambda (x) (equal? (typeof x) 'double)))
-(def sring?  (lambda (x) (equal? (typeof x) 'string)))
-(def ident?  (lambda (x) (equal? (typeof x) 'ident)))
-(def list?   (lambda (x) (equal? (typeof x) 'list)))
+(def nil?    (lambda (x) (equal? (typeof x) "nil")))
+(def bool?   (lambda (x) (equal? (typeof x) "bool")))
+(def int?    (lambda (x) (equal? (typeof x) "int")))
+(def double? (lambda (x) (equal? (typeof x) "double")))
+(def sring?  (lambda (x) (equal? (typeof x) "string")))
+(def ident?  (lambda (x) (equal? (typeof x) "ident")))
+(def list?   (lambda (x) (equal? (typeof x) "list")))
 
 (def range (lambda (a b)
   (if (less? a b) (cons a (range (+ a 1) b)) ())))
@@ -41,7 +48,7 @@
 
 
 (def foldl (lambda (f acc l)
-  ((println 'test)
+  ((println "test")
   (println f)
   (println acc)
   (println l)
@@ -59,7 +66,7 @@
 
 
 (def help (lambda ()
-  (println 'hello)))
+  (println "hello, %user%")))
 
 
 
