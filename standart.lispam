@@ -14,6 +14,8 @@
 (def +            (macro          (x y)   (__kernel_plus        x y)))
 (def -            (macro          (x y)   (__kernel_minus       x y)))
 (def *            (macro          (x y)   (__kernel_multiplies  x y)))
+(def less?        (macro          (x y)   (__kernel_less        x y)))
+(def equal?       (macro          (x y)   (__kernel_equal       x y)))
 (def println      (macro          (x)     (__kernel_println     x)))       ; // TODO args
 (def if           (macro          (c x y) (__kernel_if          c x y)))
 (def cons         (macro          (x y)   (__kernel_cons        x y)))
@@ -27,8 +29,6 @@
 
 
 (def not?       (lambda (x)   (if x false true)))
-(def less?      (lambda (x y) (__kernel_less x y)))
-(def equal?     (lambda (x y) (__kernel_equal x y)))
 (def greater?   (lambda (x y) (less? y x)))
 (def not-equal? (lambda (x y) (not (equal? x y))))
 
