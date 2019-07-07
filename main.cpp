@@ -28,16 +28,16 @@ int main() {
 
       if (str == ":l") {
         env = std::make_shared<env_t>();
-        str = "(:load \"standart.lispam\")";
+        str = "(__kernel_load \"standart.lispam\")";
       } else if (str == "") {
         break;
       }
 
       try {
-        auto l = parse(str);
-        std::cout << "input: \t" << show(l) << std::endl;
-        l = eval(l, env, ctx);
-        std::cout << "result: \t" << show(l) << std::endl;
+        auto l = object_t::parse(str);
+        std::cout << "input: \t" << l->show() << std::endl;
+        l = l->eval(env, ctx);
+        std::cout << "result: \t" << l->show() << std::endl;
       } catch (const std::exception& e) {
         std::cout << "exception: \t" << e.what() << std::endl;
       } catch (...) {

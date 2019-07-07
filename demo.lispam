@@ -1,14 +1,16 @@
 
 
 
-(def foldl (lambda (f acc l)
-  (if (nil? l) acc
-    (foldl f (f (head l) acc) (tail l)))))
+; TEST
 
-(println (foldl sum 0 (quote (1 2 3 4 5))))
+(def f1 (lambda (x) x))
+(def f2 (lambda (x) x))
 
-(def msum (macro (x y) (+ x y)))
-(def fsum (lambda (x y) (+ x y)))
+(def assert (lambda (x y) (if (equal x y) (println "Ok") (println (cons x (cons y ()))))))
+(assert 3 (plus 1 3))
+(assert 10 (plus (plus 1 2) (plus 3 4)))
+
+
 
 
 
