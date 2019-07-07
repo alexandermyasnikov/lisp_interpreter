@@ -449,13 +449,13 @@ namespace lisp_interpreter {
           ret = eval_typeof(h, t, env, ctx);
         } else if (v->value == "__kernel_load") {
           ret = eval_load(h, t, env, ctx);
-        } else if (v->value == "def") {
+        } else if (v->value == "__kernel_def") {
           ret = eval_def(h, t, env, env, ctx);
-        } else if (v->value == "lambda") {
+        } else if (v->value == "__kernel_lambda") {
           ret = eval_lambda(h, t, env, ctx);
-        } else if (v->value == "macro") {
+        } else if (v->value == "__kernel_macro") {
           ret = eval_macro(h, t, env, ctx);
-        } else if (v->value == "quote") {
+        } else if (v->value == "__kernel_quote") {
           ret = eval_quote(h, t, env, ctx);
         } else {
           ret = eval_call(h, t, env, ctx);

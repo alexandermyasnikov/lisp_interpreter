@@ -7,7 +7,10 @@
 ; myasnikov.alexander.s@gmail.com
 
 
-
+; KERNEL ABSTRACTION
+(__kernel_def def (__kernel_macro (k v)   (__kernel_def    k v)))
+(def macro        (__kernel_macro (a b)   (__kernel_macro  a b)))
+(def lambda       (__kernel_macro (a b)   (__kernel_lambda a b)))
 (def +       (macro (x y)   (__kernel_plus        x y)))
 (def -       (macro (x y)   (__kernel_minus       x y)))
 (def *       (macro (x y)   (__kernel_multiplies  x y)))
@@ -18,8 +21,10 @@
 (def tail    (macro (x)     (__kernel_tail        x)))
 (def typeof  (macro (x)     (__kernel_typeof      x)))
 (def load    (macro (x)     (__kernel_load        x)))
-; (def quote   (lambda (x)     (__kernel_quote       x)))
-; (def eval    (lambda (x)     (__kernel_eval        x)))
+(def quote   (lambda (x)    (__kernel_quote       x)))
+(def eval    (lambda (x)    (__kernel_eval        x)))
+
+
 
 (def not?       (lambda (x)   (if x false true)))
 (def less?      (lambda (x y) (__kernel_less x y)))
