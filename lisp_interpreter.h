@@ -99,6 +99,8 @@ namespace lisp_interpreter {
   struct context_t {
     std::stringstream stream;
     size_t eval_calls;
+    uint64_t time_parse;
+    uint64_t time_eval;
     // size_t stack_level_max;
     // size_t stack_level;
 
@@ -172,10 +174,18 @@ namespace lisp_interpreter {
       object_macro_sptr_t     // macro
     >;
 
-    object_t(const variant_t& value) : value(value) { }
+
+    object_t(const variant_t& value) : value(value) {
+      DEBUG_LOGGER_TRACE_LISP;
+      DEBUG_LOGGER_LISP("this: %p", this);
+    }
+
+    ~object_t() {
+      DEBUG_LOGGER_TRACE_LISP;
+      DEBUG_LOGGER_LISP("this: %p", this);
+    }
 
    private:
-
     static object_sptr_t atom(const variant_t& value) {
       return std::make_shared<object_t>(value);
     }

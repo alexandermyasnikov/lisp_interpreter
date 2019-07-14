@@ -7,6 +7,8 @@
 #define DEBUG_LOGGER(name, indent)       debug_logger_t debug_logger(indent, name, __FILE__, __FUNCTION__, __LINE__)
 #define DEBUG_LOG(name, indent, ...)     debug_logger_t::log(name, indent, __LINE__, __VA_ARGS__)
 
+#define LOG_DURATION(time)               log_duration_t(time);
+
 
 
 class debug_logger_t {
@@ -47,3 +49,17 @@ class debug_logger_t {
   uint64_t     time;
 };
 
+struct log_duration_t {
+  log_duration_t(uint64_t& time) : time(time), start(std::chrono::steady_clock::now()) {
+  }
+
+  ~log_duration_t() {
+    auto finish = std::chrono::steady_clock::now();
+    auto dur = finish - start;
+    time = std::chrono::duration_cast<std::chrono::milliseconds>(dur).count();
+  }
+
+ private:
+  uint64_t& time;
+  std::chrono::steady_clock::time_point start;
+};

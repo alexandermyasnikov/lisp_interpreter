@@ -34,9 +34,17 @@ int main() {
       }
 
       try {
-        auto l = object_t::parse(str);
+        object_sptr_t l;
+        {
+          LOG_DURATION(ctx.time_parse);
+          l = object_t::parse(str);
+        }
         std::cout << "input: \t" << l->show() << std::endl;
-        l = l->eval(env, ctx);
+        {
+          ctx.time_eval = 159;
+          LOG_DURATION(ctx.time_eval);
+          l = l->eval(env, ctx);
+        }
         std::cout << "result: \t" << l->show() << std::endl;
       } catch (const std::exception& e) {
         std::cout << "exception: \t" << e.what() << std::endl;
@@ -45,6 +53,8 @@ int main() {
       }
 
       std::cout << "eval_calls: \t" << ctx.eval_calls << std::endl;
+      std::cout << "time_parse: \t" << ctx.time_parse << " ms" << std::endl;
+      std::cout << "time_eval: \t" << ctx.time_eval << " ms" << std::endl;
       std::cout << "stream: \t" << ctx.stream.str() << std::endl;
     }
   }
