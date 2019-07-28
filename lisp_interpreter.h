@@ -16,7 +16,7 @@
 #define DEBUG_LOGGER_LISP(...)           // DEBUG_LOG("lisp ", logger_indent_lisp_t::indent, __VA_ARGS__)
 
 template <typename T>
-struct logger_indent_t { static inline int indent; };
+struct logger_indent_t { static inline int indent = 0; };
 
 struct logger_indent_lisp_t   : logger_indent_t<logger_indent_lisp_t> { };
 

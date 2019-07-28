@@ -49,16 +49,16 @@
 (def id (lambda (x) x))
 
 (def reverse (lambda (l)
-  ((def iter (lambda (l res) (
-    if (nil? l) res (iter (tail l) (cons (head l) res)))))
+  ((def iter (lambda (l res)
+    (if (nil? l) res (iter (tail l) (cons (head l) res)))))
   (iter l ()))))
 
 (def ranger (lambda (a b)
   (if (less? a b) (cons a (ranger (+ a 1) b)) ())))
 
 (def range (lambda (a b)
-  ((def iter (lambda (a b res) (
-    if (less? a b) (iter (+ a 1) b (cons a res)) (res))))
+  ((def iter (lambda (a b res)
+    (if (less? a b) (iter (+ a 1) b (cons a res)) (res))))
   (reverse (iter a b ())))))
 
 (def foldl (lambda (f acc l)
@@ -70,14 +70,14 @@
     (foldl f (f acc (head l)) (tail l)))))
 
 (def filter (lambda (f l)
-  ((def iter (lambda (f l res) (
-    if (nil? l) res (iter f (tail l)
+  ((def iter (lambda (f l res)
+    (if (nil? l) res (iter f (tail l)
       (if (f (head l)) (cons (head l) res) res)))))
   (reverse (iter f l ())))))
 
 
-(def fib (lambda (x) (
-  (def fib (lambda (a b x) (if (greater? x 0) (fib b (+ a b) (- x 1)) (b))))
+(def fib (lambda (x)
+  ((def fib (lambda (a b x) (if (greater? x 0) (fib b (+ a b) (- x 1)) (b))))
   (fib 1 1 x))))
 
 (def fibr (lambda (x) (if (greater? x 0) (+ (fibr (- x 1)) (fibr (- x 2))) 1)))

@@ -8,6 +8,7 @@
 #include <sstream>
 
 #include "lisp_interpreter.h"
+#include "lisp_utils.h"
 
 #define PRM(msg)  std::cout << __FUNCTION__ << ':' << __LINE__ << '\t' << msg << std::endl
 #define assert(x) if (!(x)) PRM("ASSERT " #x)
@@ -16,6 +17,14 @@
 
 int main() {
   using namespace lisp_interpreter;
+
+  {
+    lisp_utils::lisp_compiler_t lisp_compiler;
+    lisp_compiler.test();
+    std::cout << "end" << std::endl;
+
+    return 0;
+  }
 
   // R E P L
   {
