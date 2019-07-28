@@ -10,6 +10,11 @@ struct logger_indent_ulisp_t   : logger_indent_t<logger_indent_ulisp_t> { };
 
 namespace lisp_utils {
 
+  template<class... Ts> struct overloaded : Ts... { using Ts::operator()...; };
+  template<class... Ts> overloaded(Ts...) -> overloaded<Ts...>;
+
+
+
   struct object_t { };
 
   using register_t = uint64_t;
@@ -72,7 +77,7 @@ namespace lisp_utils {
       END,
     };
 
-    using attribute_t = std::variant<std::string>; // TODO
+    using attribute_t = std::variant<std::string, bool, int64_t, double>;
     using tokens_t = std::list<std::pair<token_t, attribute_t>>;
 
     struct object_t {
@@ -85,19 +90,56 @@ namespace lisp_utils {
 
     struct lexical_analyzer_t {
 
-      using rules_t = std::list<std::pair<token_t, std::regex>>;
+      struct rule_t {
+        token_t      token;
+        std::regex   regex;
+        std::function<attribute_t (const std::string&)> get_attribute;
+      };
+
+      using rules_t = std::list<rule_t>;
 
       static inline rules_t rules = {
-        { token_t::EMPTY,       std::regex("\\s+|;.*\n") },
-        { token_t::LP,          std::regex("\\(") },
-        { token_t::RP,          std::regex("\\)") },
-        { token_t::DOUBLE,      std::regex("[-+]?((\\d+\\.\\d*)|(\\d*\\.\\d+))") },
-        { token_t::INTEGER,     std::regex("[-+]?\\d+") },
-        { token_t::TRUE,        std::regex("true",     std::regex_constants::icase) },
-        { token_t::FALSE,       std::regex("false",    std::regex_constants::icase) },
-        { token_t::LAMBDA,      std::regex("lambda",   std::regex_constants::icase) },
-        { token_t::MACRO,       std::regex("macro",    std::regex_constants::icase) },
-        { token_t::NAME,        std::regex("[\\w!#$%&*+-./:<=>?@_]+") },
+        {
+          token_t::EMPTY,
+          std::regex("\\s+|;.*\n"),
+          [](const auto&) { return std::string{}; }
+        }, {
+          token_t::LP,
+          std::regex("\\("),
+          [](const auto&) { return std::string("("); }
+        }, {
+          token_t::RP,
+          std::regex("\\)"),
+          [](const auto&) { return std::string(")"); }
+        }, {
+          token_t::DOUBLE,
+          std::regex("[-+]?((\\d+\\.\\d*)|(\\d*\\.\\d+))"),
+          [](const auto& str) { return std::stod(str); }
+        }, {
+          token_t::INTEGER,
+          std::regex("[-+]?\\d+"),
+          [](const auto& str) { return std::stol(str); }
+        }, {
+          token_t::TRUE,
+          std::regex("true", std::regex_constants::icase),
+          [](const auto&) { return true; }
+        }, {
+          token_t::FALSE,
+          std::regex("false", std::regex_constants::icase),
+          [](const auto&) { return false; }
+        }, {
+          token_t::LAMBDA,
+          std::regex("lambda", std::regex_constants::icase),
+          [](const auto&) { return std::string("lambda todo"); }
+        }, {
+          token_t::MACRO,
+          std::regex("macro", std::regex_constants::icase),
+          [](const auto&) { return std::string("macro todo"); }
+        }, {
+          token_t::NAME,
+          std::regex("[\\w!#$%&*+-./:<=>?@_]+"),
+          [](const auto& str) { return str; }
+        }
       };
 
       tokens_t parse(const std::string& str) {
@@ -107,9 +149,9 @@ namespace lisp_utils {
         std::smatch m;
         while (!s.empty()) {
           for (const auto& rule : rules) {
-            if (std::regex_search(s, m, rule.second, std::regex_constants::match_continuous)) {
-              if (rule.first != token_t::EMPTY)
-                tokens.push_back({rule.first, m.str()});
+            if (std::regex_search(s, m, rule.regex, std::regex_constants::match_continuous)) {
+              if (rule.token != token_t::EMPTY)
+                tokens.push_back({rule.token, rule.get_attribute(m.str())});
               DEBUG_LOGGER_ULISP("found: '%s'", m.str().c_str());
               s = m.suffix().str();
               break;
@@ -124,18 +166,17 @@ namespace lisp_utils {
             s.erase(s.begin());
           }
         }
-        tokens.push_back({token_t::END, ""});
+        tokens.push_back({token_t::END, std::string{}});
         return tokens;
       }
     };
 
     struct syntax_analyzer {
 
-      using rules_t = std::list<std::pair<token_t, std::regex>>;
+      // using rules_t = std::list<std::pair<token_t, std::regex>>;
 
-      static inline rules_t rules = {
-        // { "list",     { "LP", "RP" } },
-      };
+      // static inline rules_t rules = {
+      // };
 
       void match(tokens_t& tokens, token_t token) {
         DEBUG_LOGGER_ULISP("match : '%s'", std::get<std::string>(tokens.front().second).c_str());
@@ -187,10 +228,18 @@ namespace lisp_utils {
       std::string code = "( (def fib (lambda (x) ((def fib (lambda (a b x) (if (greater? x 0) (fib b (+ a b) (- x 1)) (b)))) (fib 1 1 x)))) (print -1 +2 +.3 -4.) ;comment 2\n (print 1) )";
       auto tokens = lexical_analyzer_t().parse(code);
       for (const auto& token : tokens) {
-        DEBUG_LOGGER_ULISP("token: %d : '%s'", (int) token.first, std::get<std::string>(token.second).c_str());
+        std::string str;
+        std::visit(overloaded {
+          [&str] (const std::string& value)    { str = value; },
+          [&str] (bool value)                  { str = value ? "true" : "false"; },
+          [&str] (double value)                { str = std::to_string(value); },
+          [&str] (int64_t value)               { str = std::to_string(value); },
+          [&str] (auto)                        { str = "(unknown)"; },
+        }, token.second);
+        DEBUG_LOGGER_ULISP("token: %d : '%s'", (int) token.first, str.c_str());
       }
 
-      syntax_analyzer().parse(tokens);
+      // syntax_analyzer().parse(tokens);
     }
   };
 
