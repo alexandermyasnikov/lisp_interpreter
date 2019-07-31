@@ -84,8 +84,11 @@ namespace lisp_utils {
     struct tree_ident_t;
     using tree_ident_sptr_t = std::shared_ptr<tree_ident_t>;
 
-    struct tree_lambda_t; // TODO
-    struct tree_macro_t; // TODO
+    struct tree_lambda_t;
+    using tree_lamda_sptr_t = std::shared_ptr<tree_lambda_t>;
+
+    struct tree_macro_t;
+    using tree_macro_sptr_t = std::shared_ptr<tree_macro_t>;
 
     struct tree_list_t;
     using tree_list_sptr_t = std::shared_ptr<tree_list_t>;
@@ -95,11 +98,23 @@ namespace lisp_utils {
       double,
       int64_t,
       tree_ident_sptr_t,
+      tree_lamda_sptr_t,
+      tree_macro_sptr_t,
       tree_list_sptr_t
     >;
 
     struct tree_ident_t {
       std::string name;
+    };
+
+    struct tree_lambda_t {
+      tree_list_sptr_t args;
+      tree_t           body;
+    };
+
+    struct tree_macro_t {
+      tree_list_sptr_t args;
+      tree_t           body;
     };
 
     struct tree_list_t {
@@ -130,25 +145,37 @@ namespace lisp_utils {
 
     std::string show_tree(const tree_t& tree, int deep = 0) {
       std::string str;
+      auto show_list = [this](tree_list_sptr_t value, int& deep) -> std::string {
+        std::string str;
+        str += "( ";
+        deep += 2;
+        bool is_first = true;
+        bool simple_list = std::none_of(value->nodes.begin(), value->nodes.end(),
+            [](auto& v) { return std::get_if<tree_lamda_sptr_t>(&v) || std::get_if<tree_list_sptr_t>(&v); });
+        std::string indent = simple_list ? "" : "\n" + std::string(deep, ' ');
+
+        for (const auto& node : value->nodes) {
+          str += (is_first ? "" : indent) + show_tree(node, deep) + " ";
+          is_first = false;
+        }
+        deep -= 2;
+        str += ")";
+        return str;
+      };
       std::visit(overloaded {
         [&str, this] (bool value)                     { str = value ? "true" : "false"; },
         [&str, this] (int64_t value)                  { str = std::to_string(value); },
         [&str, this] (double value)                   { str = std::to_string(value); },
         [&str, this] (const tree_ident_sptr_t& value) { str = value->name; },
-        [&str, &deep, this] (tree_list_sptr_t value)  {
-          str += "( ";
-          deep += 2;
-          bool is_first = true;
-          bool simple_list = std::none_of(value->nodes.begin(), value->nodes.end(),
-              [](auto& v) { return std::get_if<tree_list_sptr_t>(&v); });
-          std::string indent = simple_list ? "" : "\n" + std::string(deep, ' ');
-
-          for (const auto& node : value->nodes) {
-            str += (is_first ? "" : indent) + show_tree(node, deep) + " ";
-            is_first = false;
-          }
-          deep -= 2;
-          str += ")";
+        [&str, &deep, this] (const tree_lamda_sptr_t& value) {
+          tree_list_sptr_t tree_lambda = std::make_shared<tree_list_t>();
+          tree_lambda->nodes.push_back(std::make_shared<tree_ident_t>(tree_ident_t{"lambda"}));
+          tree_lambda->nodes.push_back(value->args);
+          tree_lambda->nodes.push_back(value->body);
+          str += show_tree(tree_lambda, deep);
+        },
+        [&str, &deep, show_list] (tree_list_sptr_t value)  {
+          str += show_list(value, deep);
         },
         [&str] (auto) {
           str = "(unknown)";
@@ -265,19 +292,34 @@ namespace lisp_utils {
           case token_t::BOOL:      { tree = std::get<bool>(kv.second); break; }
           case token_t::DOUBLE:    { tree = std::get<double>(kv.second); break; }
           case token_t::INTEGER:   { tree = std::get<int64_t>(kv.second); break; }
-          case token_t::LAMBDA:    { tree = "lambda"; break; } // TODO
-          case token_t::MACRO:     { tree = "macro"; break; }
           case token_t::IDENT:     {
             tree = std::make_shared<tree_ident_t>(tree_ident_t{std::get<std::string>(kv.second)});
             break;
           }
           case token_t::LP: {
-            tree_list_sptr_t tree_list = std::make_shared<tree_list_t>();
-            while (tokens.front().first != token_t::RP) {
-              tree_list->nodes.push_back(parse_expr(tokens));
+            if (tokens.front().first == token_t::LAMBDA) {
+              match(tokens, token_t::LAMBDA);
+              tree_lamda_sptr_t tree_lambda = std::make_shared<tree_lambda_t>();
+              match(tokens, token_t::LP);
+              tree_lambda->args = std::make_shared<tree_list_t>();
+              while (tokens.front().first != token_t::RP) {
+                tree_lambda->args->nodes.push_back(std::make_shared<tree_ident_t>(
+                      tree_ident_t{std::get<std::string>(tokens.front().second)}));
+                match(tokens, token_t::IDENT);
+              }
+              match(tokens, token_t::RP);
+              tree_lambda->body = parse_expr(tokens);
+              tree = tree_lambda;
+            } else if (tokens.front().first == token_t::MACRO) {
+              throw std::runtime_error("parse_expr: macro todo");
+            } else {
+              tree_list_sptr_t tree_list = std::make_shared<tree_list_t>();
+              while (tokens.front().first != token_t::RP) {
+                tree_list->nodes.push_back(parse_expr(tokens));
+              }
+              tree = tree_list;
             }
             match(tokens, token_t::RP);
-            tree = tree_list;
             break;
           }
           default: throw std::runtime_error("parse_expr: unexpected token: " + std::to_string((int) tokens.front().first));
