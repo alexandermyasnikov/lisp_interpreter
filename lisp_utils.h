@@ -143,22 +143,22 @@ namespace lisp_utils {
       return str;
     }
 
-    std::string show_tree(const tree_t& tree, int deep = 0) {
+    std::string show_tree_helper(const tree_t& tree, size_t deep, bool pretty) {
       std::string str;
-      auto show_list = [this](tree_list_sptr_t value, int& deep) -> std::string {
+      auto show_list = [this](tree_list_sptr_t value, size_t deep, bool pretty) -> std::string {
         std::string str;
         str += "( ";
-        deep += 2;
+        deep += pretty ? 2 : 0;
         bool is_first = true;
-        bool simple_list = std::none_of(value->nodes.begin(), value->nodes.end(),
-            [](auto& v) { return std::get_if<tree_lamda_sptr_t>(&v) || std::get_if<tree_list_sptr_t>(&v); });
+        bool simple_list = !pretty || std::none_of(value->nodes.begin(), value->nodes.end(),
+            [](auto& v) { return /*std::get_if<tree_lamda_sptr_t>(&v) ||*/ std::get_if<tree_list_sptr_t>(&v); });
         std::string indent = simple_list ? "" : "\n" + std::string(deep, ' ');
 
         for (const auto& node : value->nodes) {
-          str += (is_first ? "" : indent) + show_tree(node, deep) + " ";
+          str += (is_first ? "" : indent) + show_tree_helper(node, deep, pretty) + " ";
           is_first = false;
         }
-        deep -= 2;
+        // deep -= pretty ? 2 : 0;
         str += ")";
         return str;
       };
@@ -167,21 +167,25 @@ namespace lisp_utils {
         [&str, this] (int64_t value)                  { str = std::to_string(value); },
         [&str, this] (double value)                   { str = std::to_string(value); },
         [&str, this] (const tree_ident_sptr_t& value) { str = value->name; },
-        [&str, &deep, this] (const tree_lamda_sptr_t& value) {
+        [&str, deep, pretty, this] (const tree_lamda_sptr_t& value) {
           tree_list_sptr_t tree_lambda = std::make_shared<tree_list_t>();
           tree_lambda->nodes.push_back(std::make_shared<tree_ident_t>(tree_ident_t{"lambda"}));
           tree_lambda->nodes.push_back(value->args);
           tree_lambda->nodes.push_back(value->body);
-          str += show_tree(tree_lambda, deep);
+          str += show_tree_helper(tree_lambda, deep, pretty);
         },
-        [&str, &deep, show_list] (tree_list_sptr_t value)  {
-          str += show_list(value, deep);
+        [&str, deep, pretty, show_list] (tree_list_sptr_t value)  {
+          str += show_list(value, deep, pretty);
         },
         [&str] (auto) {
           str = "(unknown)";
         },
       }, tree);
       return str;
+    }
+
+    std::string show_tree(const tree_t& tree, bool pretty = false) {
+      return show_tree_helper(tree, 0, pretty);
     }
 
 
@@ -225,7 +229,7 @@ namespace lisp_utils {
           token_t::INTEGER,
           std::regex("[-+]?\\d+"),
           [](const std::string& str) { return std::stol(str); }
-        }, {
+        },/* {
           token_t::LAMBDA,
           std::regex("lambda", std::regex_constants::icase),
           [](const std::string&) { return std::string{}; }
@@ -233,7 +237,7 @@ namespace lisp_utils {
           token_t::MACRO,
           std::regex("macro", std::regex_constants::icase),
           [](const std::string&) { return std::string{}; }
-        }, {
+        },*/ {
           token_t::IDENT,
           std::regex("[\\w!#$%&*+-./:<=>?@_]+"),
           [](const std::string& str) { return str; }
@@ -297,7 +301,7 @@ namespace lisp_utils {
             break;
           }
           case token_t::LP: {
-            if (tokens.front().first == token_t::LAMBDA) {
+            /*if (tokens.front().first == token_t::LAMBDA) {
               match(tokens, token_t::LAMBDA);
               tree_lamda_sptr_t tree_lambda = std::make_shared<tree_lambda_t>();
               match(tokens, token_t::LP);
@@ -313,12 +317,12 @@ namespace lisp_utils {
             } else if (tokens.front().first == token_t::MACRO) {
               throw std::runtime_error("parse_expr: macro todo");
             } else {
-              tree_list_sptr_t tree_list = std::make_shared<tree_list_t>();
+              */tree_list_sptr_t tree_list = std::make_shared<tree_list_t>();
               while (tokens.front().first != token_t::RP) {
                 tree_list->nodes.push_back(parse_expr(tokens));
               }
               tree = tree_list;
-            }
+            // }
             match(tokens, token_t::RP);
             break;
           }
@@ -330,16 +334,39 @@ namespace lisp_utils {
 
     struct semantic_analyzer {
 
-      /*semantic_tree_t parse(const syntax_tree_t& syntax_tree) {
-        return {};
-      }*/
+      // std::map<std::string, ident_t> idents;
+
+      tree_t parse(const tree_t& tree) {
+        return tree;
+      }
     };
 
     struct code_generator { };
 
     void test() {
       DEBUG_LOGGER_TRACE_ULISP;
-      std::string code = "( (def fib (lambda (x) ((def fib (lambda (a b x) (if (greater? x 0) (fib b (+ a b) (- x 1)) (b)))) (fib 1 1 x)))) (print -1 +2 +.3 -4.) ;comment 2\n (print 1 false) )";
+      std::string code = R"LISP(
+        ( ( def 
+            fib 
+            ( lambda 
+              ( x ) 
+              ( ( def 
+                  fib 
+                  ( lambda 
+                    ( a b x ) 
+                    ( if 
+                      ( greater? x 0 ) 
+                      ( fib 
+                        b 
+                        ( + a b ) 
+                        ( - x 1 ) ) 
+                      b ) ) ) 
+                ( fib 1 1 x ) ) ) ) 
+          ( print 
+            ( -1 2 3 0.400000 -5.000000 true false ) ) 
+          ( print 
+            ( fib 10 ) ) )
+        )LISP";
 
       { // debug
         DEBUG_LOGGER_ULISP("code: '%s'", code.c_str());
@@ -354,18 +381,18 @@ namespace lisp_utils {
         }
       }
 
-      tree_t tree = syntax_analyzer().parse(tokens);
+      tree_t syntax_tree = syntax_analyzer().parse(tokens);
 
       { // debug
-        std::string str = show_tree(tree);
-        DEBUG_LOGGER_ULISP("tree: '\n%s'", str.c_str());
+        std::string str = show_tree(syntax_tree, true);
+        DEBUG_LOGGER_ULISP("syntax_tree: '\n%s\n'", str.c_str());
       }
 
-      // semantic_tree_t semantic_tree = semantic_analyzer().parse(syntax_tree);
+      tree_t semantic_tree = semantic_analyzer().parse(syntax_tree);
 
       { // debug
-        // std::string str = show_semantic_tree(semantic_tree_t);
-        // DEBUG_LOGGER_ULISP("semantic_tree: '%s'", str.c_str());
+        std::string str = show_tree(semantic_tree, true);
+        DEBUG_LOGGER_ULISP("semantic_tree: '\n%s\n'", str.c_str());
       }
 
     }
