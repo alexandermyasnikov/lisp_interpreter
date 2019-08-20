@@ -15,7 +15,22 @@ namespace lisp_utils {
 
 
 
-  struct object_t { };
+  struct object_t {
+    // sizeof(bool) = 1
+    // sizeof(int64_t) = 8
+    // sizeof(double) = 8
+    // list: <ptr, ptr>
+    // lambda: ptr
+    // macro: ptr?
+    // string
+    // struct
+    // map
+    // set
+    size_t type  : 1 * 8,
+            count : 4 * 8,
+            size  : 3 * 8; // size_t*
+    void* data;
+  };
 
   using register_t = uint64_t;
   using stackv_t = uint64_t;
@@ -26,12 +41,13 @@ namespace lisp_utils {
 
   // static_block  { data }
   // dynamic_block { std::shared_ptr<void*> } -> { data }
+  // block: <uint64_t: ptr, uint64_t: type + count>
 
   struct state_t {
-    register_t rip; 
-    register_t rbp; 
-    register_t rsp; 
-    register_t rax; 
+    register_t rip;
+    register_t rbp;
+    register_t rsp;
+    register_t rax; // object_t
   };
 
   struct insruction_t {
@@ -54,138 +70,78 @@ namespace lisp_utils {
     text_t  text;
     stack_t stack;
     state_t state;
+    // stats_t stat;
 
     void init() { }
-    bool step() { return false; }
+    bool progress() { return false; }
   };
 
 
 
   struct lisp_compiler_t {
 
-    enum class token_t {
-      EMPTY,
-      LP,
-      RP,
-      BOOL,
-      DOUBLE,
-      INTEGER,
-      LAMBDA,
-      MACRO,
-      IDENT,
-      END,
+    struct token_empty_t   { };
+    struct token_lp_t      { };
+    struct token_rp_t      { };
+    struct token_bool_t    { bool        value; };
+    struct token_integer_t { int64_t     value; };
+    struct token_double_t  { double      value; };
+    struct token_string_t  { std::string value; };
+    struct token_ident_t   { std::string value; };
+    struct token_list_t;
+
+    using token_t = std::variant<
+      token_empty_t,
+      token_lp_t,
+      token_rp_t,
+      std::shared_ptr<token_bool_t>,
+      std::shared_ptr<token_integer_t>,
+      std::shared_ptr<token_double_t>,
+      std::shared_ptr<token_string_t>,
+      std::shared_ptr<token_ident_t>,
+      std::shared_ptr<token_list_t>>;
+
+    using tokens_t = std::list<token_t>;
+    using ast_t = std::shared_ptr<token_t>; // abstract syntax tree
+
+    struct token_list_t {
+      std::list<std::shared_ptr<token_t>> list;
     };
 
-    using attribute_t = std::variant<std::string, bool, int64_t, double>;
-    using tokens_t = std::list<std::pair<token_t, attribute_t>>;
+    // program       : stmt*
+    // stmt          : BOOL | INT | DOUBLE | STRING | IDENT | list
+    // list          : LP stmt* RP
 
+    // program       : def_stmt*
+    // def_stmt      : LP __def IDENT lambda_stmt RP
+    // lambda_stmt:  : LP __lambda LP IDENT* RP LP lambda_body* RP RP
+    // lambda_body   : def_stmt | expr
+    // if_stmt       : LP __if expr expr expr RP
+    // fun_stmt      : LP IDENT expr* RP
+    // expr          : atom | fun_stmt | if_stmt
+    // atom          : BOOL | INT | DOUBLE | STRING | IDENT | lambda_stmt
 
-
-    struct tree_ident_t;
-    using tree_ident_sptr_t = std::shared_ptr<tree_ident_t>;
-
-    struct tree_lambda_t;
-    using tree_lamda_sptr_t = std::shared_ptr<tree_lambda_t>;
-
-    struct tree_macro_t;
-    using tree_macro_sptr_t = std::shared_ptr<tree_macro_t>;
-
-    struct tree_list_t;
-    using tree_list_sptr_t = std::shared_ptr<tree_list_t>;
-
-    using tree_t = std::variant<
-      bool,
-      double,
-      int64_t,
-      tree_ident_sptr_t,
-      tree_lamda_sptr_t,
-      tree_macro_sptr_t,
-      tree_list_sptr_t
-    >;
-
-    struct tree_ident_t {
-      std::string name;
-    };
-
-    struct tree_lambda_t {
-      tree_list_sptr_t args;
-      tree_t           body;
-    };
-
-    struct tree_macro_t {
-      tree_list_sptr_t args;
-      tree_t           body;
-    };
-
-    struct tree_list_t {
-      std::list<tree_t> nodes;
-    };
-
-
-
-    struct object_t {
-      using type_t = std::variant<
-        bool,
-        double,
-        int64_t
-      >;
-    };
-
-    std::string show_attribute(const attribute_t& attribute) {
+    static std::string show_token(const token_t& token) {
       std::string str;
       std::visit(overloaded {
-        [&str] (const std::string& value)    { str = value; },
-        [&str] (bool value)                  { str = value ? "true" : "false"; },
-        [&str] (double value)                { str = std::to_string(value); },
-        [&str] (int64_t value)               { str = std::to_string(value); },
-        [&str] (auto)                        { str = "(unknown)"; },
-      }, attribute);
+        [&str] (token_empty_t)                              { str = "(empty)"; },
+        [&str] (token_lp_t)                                 { str = "("; },
+        [&str] (token_rp_t)                                 { str = ")"; },
+        [&str] (std::shared_ptr<token_bool_t>      value)   { str = value->value ? "true" : "false"; },
+        [&str] (std::shared_ptr<token_integer_t>   value)   { str = std::to_string(value->value); },
+        [&str] (std::shared_ptr<token_double_t>    value)   { str = std::to_string(value->value); },
+        [&str] (std::shared_ptr<token_string_t>    value)   { str = "\"" + value->value + "\""; },
+        [&str] (std::shared_ptr<token_ident_t>     value)   { str = value->value; },
+        [&str] (std::shared_ptr<token_list_t>      value)   { str = "( "; for (const auto& t : value->list) str += show_token(*t) + " "; str += ")"; },
+        [&str] (auto)                                       { str = "(unknown)"; },
+      }, token);
       return str;
     }
 
-    std::string show_tree_helper(const tree_t& tree, size_t deep, bool pretty) {
-      std::string str;
-      auto show_list = [this](tree_list_sptr_t value, size_t deep, bool pretty) -> std::string {
-        std::string str;
-        str += "( ";
-        deep += pretty ? 2 : 0;
-        bool is_first = true;
-        bool simple_list = !pretty || std::none_of(value->nodes.begin(), value->nodes.end(),
-            [](auto& v) { return /*std::get_if<tree_lamda_sptr_t>(&v) ||*/ std::get_if<tree_list_sptr_t>(&v); });
-        std::string indent = simple_list ? "" : "\n" + std::string(deep, ' ');
-
-        for (const auto& node : value->nodes) {
-          str += (is_first ? "" : indent) + show_tree_helper(node, deep, pretty) + " ";
-          is_first = false;
-        }
-        // deep -= pretty ? 2 : 0;
-        str += ")";
-        return str;
-      };
-      std::visit(overloaded {
-        [&str, this] (bool value)                     { str = value ? "true" : "false"; },
-        [&str, this] (int64_t value)                  { str = std::to_string(value); },
-        [&str, this] (double value)                   { str = std::to_string(value); },
-        [&str, this] (const tree_ident_sptr_t& value) { str = value->name; },
-        [&str, deep, pretty, this] (const tree_lamda_sptr_t& value) {
-          tree_list_sptr_t tree_lambda = std::make_shared<tree_list_t>();
-          tree_lambda->nodes.push_back(std::make_shared<tree_ident_t>(tree_ident_t{"lambda"}));
-          tree_lambda->nodes.push_back(value->args);
-          tree_lambda->nodes.push_back(value->body);
-          str += show_tree_helper(tree_lambda, deep, pretty);
-        },
-        [&str, deep, pretty, show_list] (tree_list_sptr_t value)  {
-          str += show_list(value, deep, pretty);
-        },
-        [&str] (auto) {
-          str = "(unknown)";
-        },
-      }, tree);
-      return str;
-    }
-
-    std::string show_tree(const tree_t& tree, bool pretty = false) {
-      return show_tree_helper(tree, 0, pretty);
+    std::string show_ast(ast_t ast) {
+      token_t token = *ast;
+      std::string ret = show_token(token);
+      return ret;
     }
 
 
@@ -193,54 +149,41 @@ namespace lisp_utils {
     struct lexical_analyzer_t {
 
       struct rule_t {
-        token_t      token;
         std::regex   regex;
-        std::function<attribute_t (const std::string&)> get_attribute;
+        std::function<token_t (const std::string&)> get_token;
       };
 
       using rules_t = std::list<rule_t>;
 
       static inline rules_t rules = {
         {
-          token_t::EMPTY,
-          std::regex("\\s+|;.*\n"),
-          [](const std::string&) { return std::string{}; }
+          std::regex("\\s+|;.*?\n"),
+          [](const std::string&) { return token_empty_t{}; }
         }, {
-          token_t::LP,
           std::regex("\\("),
-          [](const std::string&) { return std::string{}; }
+          [](const std::string&) { return token_lp_t{}; }
         }, {
-          token_t::RP,
           std::regex("\\)"),
-          [](const std::string&) { return std::string{}; }
+          [](const std::string&) { return token_rp_t{}; }
         }, {
-          token_t::BOOL,
           std::regex("true", std::regex_constants::icase),
-          [](const std::string&) { return true; }
+          [](const std::string&) { return std::make_shared<token_bool_t>(token_bool_t{true}); }
         }, {
-          token_t::BOOL,
           std::regex("false", std::regex_constants::icase),
-          [](const std::string&) { return false; }
+          [](const std::string&) { return std::make_shared<token_bool_t>(token_bool_t{false}); }
         }, {
-          token_t::DOUBLE,
           std::regex("[-+]?((\\d+\\.\\d*)|(\\d*\\.\\d+))"),
-          [](const std::string& str) { return std::stod(str); }
+          [](const std::string& str) { return std::make_shared<token_double_t>(token_double_t{std::stod(str)}); }
         }, {
-          token_t::INTEGER,
+          std::regex("\".*?\""),
+          [](const std::string& str) { return std::make_shared<token_string_t>(
+              token_string_t{str.substr(1, str.size() - 2)}); }
+        }, {
           std::regex("[-+]?\\d+"),
-          [](const std::string& str) { return std::stol(str); }
-        },/* {
-          token_t::LAMBDA,
-          std::regex("lambda", std::regex_constants::icase),
-          [](const std::string&) { return std::string{}; }
+          [](const std::string& str) { return std::make_shared<token_integer_t>(token_integer_t{std::stol(str)}); }
         }, {
-          token_t::MACRO,
-          std::regex("macro", std::regex_constants::icase),
-          [](const std::string&) { return std::string{}; }
-        },*/ {
-          token_t::IDENT,
           std::regex("[\\w!#$%&*+-./:<=>?@_]+"),
-          [](const std::string& str) { return str; }
+          [](const std::string& str) { return std::make_shared<token_ident_t>(token_ident_t{str}); }
         }
       };
 
@@ -252,8 +195,9 @@ namespace lisp_utils {
         while (!s.empty()) {
           for (const auto& rule : rules) {
             if (std::regex_search(s, m, rule.regex, std::regex_constants::match_continuous)) {
-              if (rule.token != token_t::EMPTY)
-                tokens.push_back({rule.token, rule.get_attribute(m.str())});
+              token_t token = rule.get_token(m.str());
+              if (!std::get_if<token_empty_t>(&token))
+                tokens.push_back(token);
               s = m.suffix().str();
               break;
             }
@@ -266,78 +210,73 @@ namespace lisp_utils {
             s.erase(s.begin());
           }
         }
-        tokens.push_back({token_t::END, std::string{}});
         return tokens;
       }
     };
 
     struct syntax_analyzer {
 
-      tree_t parse(const tokens_t& tokens) {
+      ast_t parse(tokens_t tokens) {
         DEBUG_LOGGER_TRACE_ULISP;
-        tokens_t t = tokens;
-        tree_t tree = parse_expr(t);
-        match(t, token_t::END);
-        return tree;
-      }
-
-      void match(tokens_t& tokens, token_t token) {
-        if (tokens.front().first != token)
-          throw std::runtime_error("match: unexpected token: " + std::to_string((int) tokens.front().first) + ", expected: " + std::to_string((int) token));
-        tokens.pop_front();
-      }
-
-      tree_t parse_expr(tokens_t& tokens) {
-        if (tokens.empty()) throw std::runtime_error("parse_expr: empty tokens");
-        tree_t tree;
-        auto kv = tokens.front();
-        match(tokens, kv.first);
-        switch (kv.first) {
-          case token_t::BOOL:      { tree = std::get<bool>(kv.second); break; }
-          case token_t::DOUBLE:    { tree = std::get<double>(kv.second); break; }
-          case token_t::INTEGER:   { tree = std::get<int64_t>(kv.second); break; }
-          case token_t::IDENT:     {
-            tree = std::make_shared<tree_ident_t>(tree_ident_t{std::get<std::string>(kv.second)});
-            break;
+        std::stack<std::shared_ptr<token_list_t>> stack;
+        stack.push(std::make_shared<token_list_t>());
+        for (const auto& token : tokens) {
+          if (std::get_if<token_lp_t>(&token)) {
+            stack.push(std::make_shared<token_list_t>());
+          } else if (std::get_if<token_rp_t>(&token)) {
+            auto top = std::make_shared<token_t>(stack.top());
+            stack.pop();
+            stack.top()->list.push_back(top);
+          } else {
+            stack.top()->list.push_back(std::make_shared<token_t>(token));
           }
-          case token_t::LP: {
-            /*if (tokens.front().first == token_t::LAMBDA) {
-              match(tokens, token_t::LAMBDA);
-              tree_lamda_sptr_t tree_lambda = std::make_shared<tree_lambda_t>();
-              match(tokens, token_t::LP);
-              tree_lambda->args = std::make_shared<tree_list_t>();
-              while (tokens.front().first != token_t::RP) {
-                tree_lambda->args->nodes.push_back(std::make_shared<tree_ident_t>(
-                      tree_ident_t{std::get<std::string>(tokens.front().second)}));
-                match(tokens, token_t::IDENT);
-              }
-              match(tokens, token_t::RP);
-              tree_lambda->body = parse_expr(tokens);
-              tree = tree_lambda;
-            } else if (tokens.front().first == token_t::MACRO) {
-              throw std::runtime_error("parse_expr: macro todo");
-            } else {
-              */tree_list_sptr_t tree_list = std::make_shared<tree_list_t>();
-              while (tokens.front().first != token_t::RP) {
-                tree_list->nodes.push_back(parse_expr(tokens));
-              }
-              tree = tree_list;
-            // }
-            match(tokens, token_t::RP);
-            break;
-          }
-          default: throw std::runtime_error("parse_expr: unexpected token: " + std::to_string((int) tokens.front().first));
         }
-        return tree;
+        if (stack.size() != 1) throw std::runtime_error("syntax_analyzer: parse error");
+        auto ret = std::make_shared<token_t>(stack.top());
+        return ret;
       }
     };
 
     struct semantic_analyzer {
 
-      // std::map<std::string, ident_t> idents;
+      struct production_t;
+      using productions_t = std::map<std::string, production_t>;
 
-      tree_t parse(const tree_t& tree) {
-        return tree;
+      struct production_t {
+        std::function<bool (const productions_t& productions, const tokens_t&)> parse;
+      };
+
+      // stmt          : def_stmt*
+      // def_stmt      : LP __def IDENT lambda_stmt RP
+      // lambda_stmt:  : LP __lambda LP IDENT* RP LP lambda_body* RP RP
+      // lambda_body   : def_stmt | expr
+      // if_stmt       : LP __if expr expr expr RP
+      // fun_stmt      : LP IDENT expr* RP
+      // expr          : atom | fun_stmt | if_stmt
+      // atom          : BOOL | INT | DOUBLE | STRING | IDENT | lambda_stmt
+
+      struct program_stmt_t;
+      static inline productions_t productions = {
+        {
+          "stmt", {
+            [](const productions_t& productions, const tokens_t& tokens) {
+              while (productions.at("def_stmt").parse(productions, tokens)) { }
+              return true;
+            },
+          },
+        }
+      };
+
+      ast_t parse(ast_t ast) {
+        DEBUG_LOGGER_TRACE_ULISP;
+        /*tokens_t tokens = tokens_orig;
+        productions.at("stmt").parse(productions, tokens);
+        if (!tokens.empty()) {
+          DEBUG_LOGGER_ULISP("WARN: unexpected: '%s'", show_token(tokens.front()).c_str());
+          DEBUG_LOGGER_ULISP("WARN: tokens.size(): %zd", tokens.size());
+        }
+        return tokens;*/
+        return ast;
       }
     };
 
@@ -346,27 +285,10 @@ namespace lisp_utils {
     void test() {
       DEBUG_LOGGER_TRACE_ULISP;
       std::string code = R"LISP(
-        ( ( def 
-            fib 
-            ( lambda 
-              ( x ) 
-              ( ( def 
-                  fib 
-                  ( lambda 
-                    ( a b x ) 
-                    ( if 
-                      ( greater? x 0 ) 
-                      ( fib 
-                        b 
-                        ( + a b ) 
-                        ( - x 1 ) ) 
-                      b ) ) ) 
-                ( fib 1 1 x ) ) ) ) 
-          ( print 
-            ( -1 2 3 0.400000 -5.000000 true false ) ) 
-          ( print 
-            ( fib 10 ) ) )
-        )LISP";
+        (def fib (lambda (x)
+          ((def fib (lambda (a b x) (if (greater? x 0) (fib b (+ a b) (- x 1)) (b))))
+          (fib 1 1 x))))
+      )LISP";
 
       { // debug
         DEBUG_LOGGER_ULISP("code: '%s'", code.c_str());
@@ -375,23 +297,24 @@ namespace lisp_utils {
       auto tokens = lexical_analyzer_t().parse(code);
 
       { // debug
+        std::string str;
         for (const auto& token : tokens) {
-          std::string str = show_attribute(token.second);
-          DEBUG_LOGGER_ULISP("token: %d : '%s'", (int) token.first, str.c_str());
+          str += show_token(token) + " ";
         }
+        DEBUG_LOGGER_ULISP("tokens: '\n%s'", str.c_str());
       }
 
-      tree_t syntax_tree = syntax_analyzer().parse(tokens);
+      ast_t syntax_tree = syntax_analyzer().parse(tokens);
 
       { // debug
-        std::string str = show_tree(syntax_tree, true);
+        std::string str = show_ast(syntax_tree);
         DEBUG_LOGGER_ULISP("syntax_tree: '\n%s\n'", str.c_str());
       }
 
-      tree_t semantic_tree = semantic_analyzer().parse(syntax_tree);
+      auto semantic_tree = semantic_analyzer().parse(syntax_tree);
 
       { // debug
-        std::string str = show_tree(semantic_tree, true);
+        std::string str = show_ast(semantic_tree);
         DEBUG_LOGGER_ULISP("semantic_tree: '\n%s\n'", str.c_str());
       }
 
