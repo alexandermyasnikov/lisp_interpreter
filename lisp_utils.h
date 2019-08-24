@@ -168,9 +168,9 @@ namespace lisp_utils {
     struct semantic_tree_t {
       std::map<std::shared_ptr<semantic_ident_t>, semantic_lambda_stmt_t> def_stmt;
 
-      struct semantic_context {
-        std::stack<std::string> name_space; // tmp
-      };
+      // struct semantic_context {
+      //   std::stack<std::string> name_space; // tmp
+      // };
 
     };
 
@@ -208,9 +208,76 @@ namespace lisp_utils {
     }
 
 
+
+    static std::string show_semantic_atom(const semantic_atom_t& semantic_atom, size_t deep) {
+      std::string indent = std::string(deep, ' ');
+      std::string str = indent + "semantic_atom: \n";
+      str += indent + "  ";
+      std::visit(overloaded {
+        [&str] (const lexeme_bool_t    &value) { str += value.value ? "true" : "false"; },
+        [&str] (const lexeme_integer_t &value) { str += std::to_string(value.value); },
+        [&str] (const lexeme_double_t  &value) { str += std::to_string(value.value); },
+        [&str] (const lexeme_string_t  &value) { str += "\"" + value.value + "\""; },
+        [&str] (const lexeme_ident_t   &value) { str += value.value; },
+        [&str] (auto)                          { str += "(unknown)"; },
+      }, semantic_atom.atom);
+      str += "\n";
+      return str;
+    }
+
+    static std::string show_semantic_fun_stmt(const semantic_fun_stmt_t& semantic_fun_stmt, size_t deep) {
+      std::string indent = std::string(deep, ' ');
+      std::string str = indent + "semantic_fun_stmt: \n";
+      str += indent + "  name: \n";
+      str += show_semantic_ident(*semantic_fun_stmt.name, deep + 4);
+      str += indent + "  args: \n";
+      for (const auto& arg : semantic_fun_stmt.args) {
+        str += show_semantic_expr_stmt(arg, deep + 4);
+      }
+      return str;
+    }
+
+    static std::string show_semantic_if_stmt(const semantic_if_stmt_t& semantic_if_stmt, size_t deep) {
+      std::string indent = std::string(deep, ' ');
+      std::string str = indent + "semantic_if_stmt: \n";
+      str += indent + "  test_expr: \n";
+      str += show_semantic_expr_stmt(semantic_if_stmt.test_expr, deep + 4);
+      str += indent + "  then_expr: \n";
+      str += show_semantic_expr_stmt(semantic_if_stmt.then_expr, deep + 4);
+      str += indent + "  else_expr: \n";
+      str += show_semantic_expr_stmt(semantic_if_stmt.else_expr, deep + 4);
+      return str;
+    }
+
     static std::string show_semantic_expr_stmt(const semantic_expr_stmt_t& semantic_expr_stmt, size_t deep) {
       std::string indent = std::string(deep, ' ');
       std::string str = indent + "semantic_expr_stmt: \n";
+
+      std::visit(overloaded {
+        [&str, deep] (std::shared_ptr<semantic_atom_t> value) {
+          str += show_semantic_atom(*value, deep + 2);
+        },
+        [&str, deep] (std::shared_ptr<semantic_fun_stmt_t> value) {
+          str += show_semantic_fun_stmt(*value, deep + 2);
+        },
+        [&str, deep] (std::shared_ptr<semantic_if_stmt_t> value) {
+          str += show_semantic_if_stmt(*value, deep + 2);
+        },
+        [&str, deep] (std::shared_ptr<semantic_lambda_stmt_t> value) {
+          str += show_semantic_lambda_stmt(*value, deep + 2);
+        },
+        [&str] (auto)                          { str = "(unknown)\n"; },
+      }, semantic_expr_stmt.expr);
+
+    /*struct semantic_expr_stmt_t {
+      using expr_t = std::variant<
+        std::shared_ptr<semantic_atom_t>,
+        std::shared_ptr<semantic_fun_stmt_t>,
+        std::shared_ptr<semantic_if_stmt_t>,
+        std::shared_ptr<semantic_lambda_stmt_t>>;
+      expr_t expr;
+    };*/
+
       // str += indent + "  name: " + semantic_ident.name + "\n";
       return str;
     }
@@ -239,8 +306,9 @@ namespace lisp_utils {
 
     static std::string show_semantic_tree(const semantic_tree_t& semantic_tree) {
       std::string str = "semantic_tree: \n";
-      size_t deep = 2;
+      size_t deep = 4;
       for (const auto& def_stm : semantic_tree.def_stmt) {
+        str += "  def_stmt: \n";
         str += show_semantic_ident(*def_stm.first, deep);
         str += show_semantic_lambda_stmt(def_stm.second, deep);
       }
@@ -393,6 +461,7 @@ namespace lisp_utils {
 
           auto ident = std::make_shared<semantic_ident_t>(semantic_ident_t{fun_name, {}});
           semantic_tree.def_stmt[ident] = lambda;
+          return;
 
         } catch (const std::exception& e) {
           throw std::runtime_error("semantic_analyzer: expected def_stmt");
@@ -440,12 +509,14 @@ namespace lisp_utils {
         try {
           try {
             parse_def_stmt(syntax_tree, semantic_tree);
+            return;
           } catch (const std::exception& e) {
             ;
           }
 
           auto expr = parse_expr_stmt(syntax_tree, semantic_tree);
           semantic_lambda_stmt.body.push_back(expr);
+          return;
 
         } catch (const std::exception& e) {
           throw std::runtime_error("semantic_analyzer: expected lambda_body_stmt");
@@ -457,6 +528,20 @@ namespace lisp_utils {
 
         try {
           try {
+            const auto if_stmt = parse_if_stmt(syntax_tree, semantic_tree);
+            return {std::make_shared<semantic_if_stmt_t>(semantic_if_stmt_t{if_stmt})};
+          } catch (const std::exception& e) {
+            ;
+          }
+
+          try {
+            const auto lambda_stmt = parse_lambda_stmt(syntax_tree, semantic_tree);
+            return {std::make_shared<semantic_lambda_stmt_t>(semantic_lambda_stmt_t{lambda_stmt})};
+          } catch (const std::exception& e) {
+            ;
+          }
+
+          try {
             const auto atom = parse_atom(syntax_tree);
             return {std::make_shared<semantic_atom_t>(semantic_atom_t{atom})};
           } catch (const std::exception& e) {
@@ -467,18 +552,8 @@ namespace lisp_utils {
             const auto fun_stmt = parse_fun_stmt(syntax_tree, semantic_tree);
             return {std::make_shared<semantic_fun_stmt_t>(semantic_fun_stmt_t{fun_stmt})};
           } catch (const std::exception& e) {
-            ;
+            throw std::exception();
           }
-
-          try {
-          const auto if_stmt = parse_if_stmt(syntax_tree, semantic_tree);
-            return {std::make_shared<semantic_if_stmt_t>(semantic_if_stmt_t{if_stmt})};
-          } catch (const std::exception& e) {
-            ;
-          }
-
-          const auto lambda_stmt = parse_lambda_stmt(syntax_tree, semantic_tree);
-          return {std::make_shared<semantic_lambda_stmt_t>(semantic_lambda_stmt_t{lambda_stmt})};
 
         } catch (const std::exception& e) {
           throw std::runtime_error("semantic_analyzer: expected expr_stmt");
@@ -566,7 +641,7 @@ namespace lisp_utils {
       DEBUG_LOGGER_TRACE_ULISP;
       std::string code = R"LISP(
         (__def fib (__lambda (x)
-          ((__def_inner fib_inner (__lambda (a b x) (__if (__greater? x 0) (fib_inner b (+ a b) (- x 1)) (b))))
+          ((__def fib_inner (__lambda (a b x) ((__if (__greater? x 0) (fib_inner b (+ a b) (- x 1)) b))))
           (fib_inner 1 1 x))))
       )LISP";
 
