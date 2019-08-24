@@ -118,8 +118,18 @@ namespace lisp_utils {
     };
 
 
+    struct semantic_ident_t {
+      std::string name;
+      size_t pointer;
+    };
 
     struct semantic_atom_t {
+      /*std::variant<
+        lexeme_bool_t,
+        lexeme_integer_t,
+        lexeme_double_t,
+        lexeme_string_t,
+        lexeme_ident_t>;*/
     };
 
     struct semantic_if_stmt_t {
@@ -132,15 +142,12 @@ namespace lisp_utils {
     };
 
     struct semantic_lambda_stmt_t {
-    };
-
-    struct semantic_def_stmt_t {
+      std::vector<std::shared_ptr<semantic_ident_t>> args;
+      std::vector<semantic_expr_stmt_t> body;
     };
 
     struct semantic_tree_t {
-      std::vector<semantic_def_stmt_t> def_stmt;
-
-      // std::map<std::string, semantic_def_stmt_t> functions; // XXX
+      std::map<std::shared_ptr<semantic_ident_t>, semantic_lambda_stmt_t> def_stmt;
 
       struct semantic_context {
         std::stack<std::string> name_space; // tmp
@@ -178,6 +185,46 @@ namespace lisp_utils {
         [&str] (const lexeme_t& value) { str = show_lexeme(value); },
         [&str] (auto)                  { str = "(unknown)"; },
       }, syntax_tree);
+      return str;
+    }
+
+
+    static std::string show_semantic_expr_stmt(const semantic_expr_stmt_t& semantic_expr_stmt, size_t deep) {
+      std::string indent = std::string(deep, ' ');
+      std::string str = indent + "semantic_expr_stmt: \n";
+      // str += indent + "  name: " + semantic_ident.name + "\n";
+      return str;
+    }
+
+    static std::string show_semantic_ident(const semantic_ident_t& semantic_ident, size_t deep) {
+      std::string indent = std::string(deep, ' ');
+      std::string str = indent + "semantic_ident: \n";
+      str += indent + "  name: " + semantic_ident.name + "\n";
+      str += indent + "  pointer: " + std::to_string(semantic_ident.pointer) + "\n";
+      return str;
+    }
+
+    static std::string show_semantic_lambda_stmt(const semantic_lambda_stmt_t& semantic_lambda_stmt, size_t deep) {
+      std::string indent = std::string(deep, ' ');
+      std::string str = indent + "semantic_lambda_stmt: \n";
+      for (const auto& arg : semantic_lambda_stmt.args) {
+        str += indent + "  arg: \n";
+        str += show_semantic_ident(*arg, deep + 4);
+      }
+      for (const auto& body : semantic_lambda_stmt.body) {
+        str += indent + "  body: \n";
+        str += show_semantic_expr_stmt(body, deep + 4);
+      }
+      return str;
+    }
+
+    static std::string show_semantic_tree(const semantic_tree_t& semantic_tree) {
+      std::string str = "semantic_tree: \n";
+      size_t deep = 2;
+      for (const auto& def_stm : semantic_tree.def_stmt) {
+        str += show_semantic_ident(*def_stm.first, deep);
+        str += show_semantic_lambda_stmt(def_stm.second, deep);
+      }
       return str;
     }
 
@@ -252,10 +299,6 @@ namespace lisp_utils {
 
     struct syntax_analyzer {
 
-      // program       : stmt*
-      // stmt          : BOOL | INT | DOUBLE | STRING | IDENT | list
-      // list          : LP stmt* RP
-
       syntax_tree_t parse(const lexemes_t& lexemes) {
         DEBUG_LOGGER_TRACE_ULISP;
         std::stack<lexeme_list_t> stack;
@@ -290,6 +333,11 @@ namespace lisp_utils {
       // using syntax_tree_t = std::variant<lexeme_t, lexeme_list_sptr_t>; 
       // struct lexeme_list_t { std::vector<syntax_tree_t> list; };
 
+      semantic_tree_t parse(const syntax_tree_t& syntax_tree) {
+        DEBUG_LOGGER_TRACE_ULISP;
+        return parse_program(syntax_tree);
+      }
+
       semantic_tree_t parse_program(const syntax_tree_t& syntax_tree) {
         DEBUG_LOGGER_TRACE_ULISP;
 
@@ -299,7 +347,7 @@ namespace lisp_utils {
           const auto& program = std::get<lexeme_list_sptr_t>(syntax_tree);
 
           for (const auto& def_stmt : program->list) {
-            semantic_tree.def_stmt.push_back(parse_def_stmt(def_stmt));
+            parse_def_stmt(def_stmt, semantic_tree);
           }
 
           return semantic_tree;
@@ -309,12 +357,10 @@ namespace lisp_utils {
         }
       };
 
-      semantic_def_stmt_t parse_def_stmt(const syntax_tree_t& syntax_tree) {
+      void parse_def_stmt(const syntax_tree_t& syntax_tree, semantic_tree_t& semantic_tree) {
         DEBUG_LOGGER_TRACE_ULISP;
 
         try {
-          semantic_def_stmt_t semantic_def_stmt;
-
           const auto& args = std::get<lexeme_list_sptr_t>(syntax_tree)->list;
 
           if (args.size() != 3)
@@ -324,17 +370,17 @@ namespace lisp_utils {
             throw std::exception();
 
           const auto& fun_name = std::get<lexeme_ident_t>(std::get<lexeme_t>(args[1])).value;
+          const auto lambda = parse_lambda_stmt(args[2], semantic_tree);
 
-          const auto lambda = parse_lambda_stmt(args[2]);
-
-          return semantic_def_stmt;
+          auto ident = std::make_shared<semantic_ident_t>(semantic_ident_t{fun_name, {}});
+          semantic_tree.def_stmt[ident] = lambda;
 
         } catch (const std::exception& e) {
           throw std::runtime_error("semantic_analyzer: expected def_stmt");
         }
       }
 
-      semantic_lambda_stmt_t parse_lambda_stmt(const syntax_tree_t& syntax_tree) {
+      semantic_lambda_stmt_t parse_lambda_stmt(const syntax_tree_t& syntax_tree, semantic_tree_t& semantic_tree) {
         DEBUG_LOGGER_TRACE_ULISP;
 
         try {
@@ -350,12 +396,14 @@ namespace lisp_utils {
 
           const auto& lambda_args = std::get<lexeme_list_sptr_t>(args[1])->list;
           for (const auto& lambda_arg : lambda_args) {
-            const auto arg = std::get<lexeme_ident_t>(std::get<lexeme_t>(lambda_arg)).value;
+            const auto arg_name = std::get<lexeme_ident_t>(std::get<lexeme_t>(lambda_arg)).value;
+            auto ident = std::make_shared<semantic_ident_t>(semantic_ident_t{arg_name, {}});
+            semantic_lambda_stmt.args.push_back(ident);
           }
 
           const auto& lambda_body_list = std::get<lexeme_list_sptr_t>(args[2])->list;
           for (const auto& lambda_body : lambda_body_list) {
-            /*const auto lambda_body =*/ parse_lambda_body_stmt(lambda_body);
+            parse_lambda_body_stmt(lambda_body, semantic_lambda_stmt, semantic_tree);
           }
 
           return semantic_lambda_stmt;
@@ -365,21 +413,23 @@ namespace lisp_utils {
         }
       }
 
-      semantic_expr_stmt_t parse_lambda_body_stmt(const syntax_tree_t& syntax_tree) {
+      void parse_lambda_body_stmt(const syntax_tree_t& syntax_tree,
+          semantic_lambda_stmt_t& semantic_lambda_stmt,
+          semantic_tree_t& semantic_tree) {
         DEBUG_LOGGER_TRACE_ULISP;
 
         try {
           try {
-            const auto def_stmt = parse_def_stmt(syntax_tree);
-            return {};
+            parse_def_stmt(syntax_tree, semantic_tree);
           } catch (const std::exception& e) {
             ;
           }
 
-          return parse_expr_stmt(syntax_tree);
+          auto expr = parse_expr_stmt(syntax_tree);
+          semantic_lambda_stmt.body.push_back(expr);
 
         } catch (const std::exception& e) {
-          throw std::runtime_error("semantic_analyzer: expected lambda_stmt");
+          throw std::runtime_error("semantic_analyzer: expected lambda_body_stmt");
         }
       }
 
@@ -405,7 +455,7 @@ namespace lisp_utils {
           return {};
 
         } catch (const std::exception& e) {
-          throw std::runtime_error("semantic_analyzer: expected lambda_stmt");
+          throw std::runtime_error("semantic_analyzer: expected expr_stmt");
         }
       }
 
@@ -429,7 +479,7 @@ namespace lisp_utils {
           return semantic_fun_stmt;
 
         } catch (const std::exception& e) {
-          throw std::runtime_error("semantic_analyzer: expected lambda_stmt");
+          throw std::runtime_error("semantic_analyzer: expected fun_stmt");
         }
       }
 
@@ -454,7 +504,7 @@ namespace lisp_utils {
           return semantic_if_stmt;
 
         } catch (const std::exception& e) {
-          throw std::runtime_error("semantic_analyzer: expected lambda_stmt");
+          throw std::runtime_error("semantic_analyzer: expected if_stmt");
         }
       }
 
@@ -469,22 +519,8 @@ namespace lisp_utils {
           return semantic_atom;
 
         } catch (const std::exception& e) {
-          throw std::runtime_error("semantic_analyzer: expected lambda_stmt");
+          throw std::runtime_error("semantic_analyzer: expected atom_stmt");
         }
-      }
-
-      // program       : def_stmt*
-      // def_stmt      : LP __def IDENT lambda_stmt RP
-      // lambda_stmt:  : LP __lambda LP IDENT* RP LP lambda_body* RP RP
-      // lambda_body   : def_stmt | expr
-      // expr          : atom | fun_stmt | if_stmt
-      // fun_stmt      : LP IDENT expr* RP
-      // if_stmt       : LP __if expr expr expr RP
-      // atom          : BOOL | INT | DOUBLE | STRING | IDENT | lambda_stmt
-
-      semantic_tree_t parse(const syntax_tree_t& syntax_tree) {
-        DEBUG_LOGGER_TRACE_ULISP;
-        return parse_program(syntax_tree);
       }
     };
 
@@ -495,8 +531,8 @@ namespace lisp_utils {
       DEBUG_LOGGER_TRACE_ULISP;
       std::string code = R"LISP(
         (__def fib (__lambda (x)
-          ((__def fib (__lambda (a b x) (__if (__greater? x 0) (fib b (+ a b) (- x 1)) (b))))
-          (fib 1 1 x))))
+          ((__def_inner fib_inner (__lambda (a b x) (__if (__greater? x 0) (fib_inner b (+ a b) (- x 1)) (b))))
+          (fib_inner 1 1 x))))
       )LISP";
 
       { // debug
@@ -523,8 +559,8 @@ namespace lisp_utils {
       auto semantic_tree = semantic_analyzer().parse(syntax_tree);
 
       { // debug
-        // std::string str = show_ast(semantic_tree);
-        // DEBUG_LOGGER_ULISP("semantic_tree: '\n%s\n'", str.c_str());
+        std::string str = show_semantic_tree(semantic_tree);
+        DEBUG_LOGGER_ULISP("semantic_tree: '\n%s\n'", str.c_str());
       }
 
     }
