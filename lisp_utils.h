@@ -123,23 +123,42 @@ namespace lisp_utils {
       size_t pointer;
     };
 
+    struct semantic_atom_t;
+    struct semantic_fun_stmt_t;
+    struct semantic_if_stmt_t;
+    struct semantic_lambda_stmt_t;
+
+    struct semantic_expr_stmt_t {
+      using expr_t = std::variant<
+        std::shared_ptr<semantic_atom_t>,
+        std::shared_ptr<semantic_fun_stmt_t>,
+        std::shared_ptr<semantic_if_stmt_t>,
+        std::shared_ptr<semantic_lambda_stmt_t>>;
+      expr_t expr;
+    };
+
     struct semantic_atom_t {
-      /*std::variant<
+      using atom_t = std::variant<
         lexeme_bool_t,
         lexeme_integer_t,
         lexeme_double_t,
         lexeme_string_t,
-        lexeme_ident_t>;*/
-    };
-
-    struct semantic_if_stmt_t {
+        lexeme_ident_t>;
+      atom_t atom;
     };
 
     struct semantic_fun_stmt_t {
+      std::shared_ptr<semantic_ident_t> name;
+      std::vector<semantic_expr_stmt_t> args;
     };
 
-    struct semantic_expr_stmt_t {
+    struct semantic_if_stmt_t {
+      semantic_expr_stmt_t test_expr;
+      semantic_expr_stmt_t then_expr;
+      semantic_expr_stmt_t else_expr;
     };
+
+
 
     struct semantic_lambda_stmt_t {
       std::vector<std::shared_ptr<semantic_ident_t>> args;
@@ -425,7 +444,7 @@ namespace lisp_utils {
             ;
           }
 
-          auto expr = parse_expr_stmt(syntax_tree);
+          auto expr = parse_expr_stmt(syntax_tree, semantic_tree);
           semantic_lambda_stmt.body.push_back(expr);
 
         } catch (const std::exception& e) {
@@ -433,33 +452,40 @@ namespace lisp_utils {
         }
       }
 
-      semantic_expr_stmt_t parse_expr_stmt(const syntax_tree_t& syntax_tree) {
+      semantic_expr_stmt_t parse_expr_stmt(const syntax_tree_t& syntax_tree, semantic_tree_t& semantic_tree) {
         DEBUG_LOGGER_TRACE_ULISP;
 
         try {
           try {
             const auto atom = parse_atom(syntax_tree);
-            return {};
+            return {std::make_shared<semantic_atom_t>(semantic_atom_t{atom})};
           } catch (const std::exception& e) {
             ;
           }
 
           try {
-            const auto fun_stmt = parse_fun_stmt(syntax_tree);
-            return {};
+            const auto fun_stmt = parse_fun_stmt(syntax_tree, semantic_tree);
+            return {std::make_shared<semantic_fun_stmt_t>(semantic_fun_stmt_t{fun_stmt})};
           } catch (const std::exception& e) {
             ;
           }
 
-          parse_if_stmt(syntax_tree);
-          return {};
+          try {
+          const auto if_stmt = parse_if_stmt(syntax_tree, semantic_tree);
+            return {std::make_shared<semantic_if_stmt_t>(semantic_if_stmt_t{if_stmt})};
+          } catch (const std::exception& e) {
+            ;
+          }
+
+          const auto lambda_stmt = parse_lambda_stmt(syntax_tree, semantic_tree);
+          return {std::make_shared<semantic_lambda_stmt_t>(semantic_lambda_stmt_t{lambda_stmt})};
 
         } catch (const std::exception& e) {
           throw std::runtime_error("semantic_analyzer: expected expr_stmt");
         }
       }
 
-      semantic_fun_stmt_t parse_fun_stmt(const syntax_tree_t& syntax_tree) {
+      semantic_fun_stmt_t parse_fun_stmt(const syntax_tree_t& syntax_tree, semantic_tree_t& semantic_tree) {
         DEBUG_LOGGER_TRACE_ULISP;
 
         try {
@@ -471,9 +497,11 @@ namespace lisp_utils {
             throw std::exception();
 
           const auto& fun_name = std::get<lexeme_ident_t>(std::get<lexeme_t>(args[0])).value;
+          semantic_fun_stmt.name = std::make_shared<semantic_ident_t>(semantic_ident_t{fun_name, {}});
 
           for (size_t i = 1; i < args.size(); ++i) {
-            const auto expr = parse_expr_stmt(args[i]);
+            const auto expr = parse_expr_stmt(args[i], semantic_tree);
+            semantic_fun_stmt.args.push_back(expr);
           }
 
           return semantic_fun_stmt;
@@ -483,12 +511,10 @@ namespace lisp_utils {
         }
       }
 
-      semantic_if_stmt_t parse_if_stmt(const syntax_tree_t& syntax_tree) {
+      semantic_if_stmt_t parse_if_stmt(const syntax_tree_t& syntax_tree, semantic_tree_t& semantic_tree) {
         DEBUG_LOGGER_TRACE_ULISP;
 
         try {
-          semantic_if_stmt_t semantic_if_stmt;
-
           const auto& args = std::get<lexeme_list_sptr_t>(syntax_tree)->list;
 
           if (args.size() != 4)
@@ -497,11 +523,11 @@ namespace lisp_utils {
           if (std::get<lexeme_ident_t>(std::get<lexeme_t>(args[0])).value != "__if")
             throw std::exception();
 
-          const auto expr_if   = parse_expr_stmt(args[1]);
-          const auto expr_then = parse_expr_stmt(args[2]);
-          const auto expr_else = parse_expr_stmt(args[3]);
+          const auto test_expr = parse_expr_stmt(args[1], semantic_tree);
+          const auto then_expr = parse_expr_stmt(args[2], semantic_tree);
+          const auto else_expr = parse_expr_stmt(args[3], semantic_tree);
 
-          return semantic_if_stmt;
+          return {test_expr, then_expr, else_expr};
 
         } catch (const std::exception& e) {
           throw std::runtime_error("semantic_analyzer: expected if_stmt");
@@ -512,11 +538,20 @@ namespace lisp_utils {
         DEBUG_LOGGER_TRACE_ULISP;
 
         try {
-          semantic_atom_t semantic_atom;
-
           const auto& atom = std::get<lexeme_t>(syntax_tree);
-
-          return semantic_atom;
+          if (std::get_if<lexeme_bool_t>(&atom)) {
+            return {std::get<lexeme_bool_t>(atom)};
+          } else if (std::get_if<lexeme_integer_t>(&atom)) {
+            return {std::get<lexeme_integer_t>(atom)};
+          } else if (std::get_if<lexeme_double_t>(&atom)) {
+            return {std::get<lexeme_double_t>(atom)};
+          } else if (std::get_if<lexeme_string_t>(&atom)) {
+            return {std::get<lexeme_string_t>(atom)};
+          } else if (std::get_if<lexeme_ident_t>(&atom)) {
+            return {std::get<lexeme_ident_t>(atom)};
+          } else {
+            throw std::exception();
+          }
 
         } catch (const std::exception& e) {
           throw std::runtime_error("semantic_analyzer: expected atom_stmt");
