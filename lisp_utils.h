@@ -143,7 +143,7 @@ namespace lisp_utils {
         lexeme_integer_t,
         lexeme_double_t,
         lexeme_string_t,
-        lexeme_ident_t>;
+        semantic_ident_t>;
       atom_t atom;
     };
 
@@ -212,14 +212,13 @@ namespace lisp_utils {
     static std::string show_semantic_atom(const semantic_atom_t& semantic_atom, size_t deep) {
       std::string indent = std::string(deep, ' ');
       std::string str = indent + "semantic_atom: \n";
-      str += indent + "  ";
       std::visit(overloaded {
-        [&str] (const lexeme_bool_t    &value) { str += value.value ? "true" : "false"; },
-        [&str] (const lexeme_integer_t &value) { str += std::to_string(value.value); },
-        [&str] (const lexeme_double_t  &value) { str += std::to_string(value.value); },
-        [&str] (const lexeme_string_t  &value) { str += "\"" + value.value + "\""; },
-        [&str] (const lexeme_ident_t   &value) { str += value.value; },
-        [&str] (auto)                          { str += "(unknown)"; },
+        [&str, indent] (const lexeme_bool_t    &value) { str += indent + (value.value ? "true" : "false"); },
+        [&str, indent] (const lexeme_integer_t &value) { str += indent + std::to_string(value.value); },
+        [&str, indent] (const lexeme_double_t  &value) { str += indent + std::to_string(value.value); },
+        [&str, indent] (const lexeme_string_t  &value) { str += indent + "\"" + value.value + "\""; },
+        [&str, deep]   (const semantic_ident_t &value) { str += show_semantic_ident(value, deep + 2); },
+        [&str, indent] (auto)                          { str += indent + "(unknown)"; },
       }, semantic_atom.atom);
       str += "\n";
       return str;
@@ -266,19 +265,8 @@ namespace lisp_utils {
         [&str, deep] (std::shared_ptr<semantic_lambda_stmt_t> value) {
           str += show_semantic_lambda_stmt(*value, deep + 2);
         },
-        [&str] (auto)                          { str = "(unknown)\n"; },
+        [&str] (auto) { str = "(unknown)\n"; },
       }, semantic_expr_stmt.expr);
-
-    /*struct semantic_expr_stmt_t {
-      using expr_t = std::variant<
-        std::shared_ptr<semantic_atom_t>,
-        std::shared_ptr<semantic_fun_stmt_t>,
-        std::shared_ptr<semantic_if_stmt_t>,
-        std::shared_ptr<semantic_lambda_stmt_t>>;
-      expr_t expr;
-    };*/
-
-      // str += indent + "  name: " + semantic_ident.name + "\n";
       return str;
     }
 
@@ -287,6 +275,7 @@ namespace lisp_utils {
       std::string str = indent + "semantic_ident: \n";
       str += indent + "  name: " + semantic_ident.name + "\n";
       str += indent + "  pointer: " + std::to_string(semantic_ident.pointer) + "\n";
+      str += indent + "  this: " + std::to_string(reinterpret_cast<size_t>(&semantic_ident)) + "\n";
       return str;
     }
 
@@ -623,7 +612,7 @@ namespace lisp_utils {
           } else if (std::get_if<lexeme_string_t>(&atom)) {
             return {std::get<lexeme_string_t>(atom)};
           } else if (std::get_if<lexeme_ident_t>(&atom)) {
-            return {std::get<lexeme_ident_t>(atom)};
+            return {semantic_ident_t{std::get<lexeme_ident_t>(atom).value, {}}};
           } else {
             throw std::exception();
           }
