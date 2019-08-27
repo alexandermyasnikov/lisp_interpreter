@@ -228,15 +228,15 @@ namespace lisp_utils {
     static std::string show_semantic_atom(const semantic_atom_t& semantic_atom, size_t deep) {
       std::string indent = std::string(deep, ' ');
       std::string str = indent + "semantic_atom: \n";
+      indent += "  ";
       std::visit(overloaded {
-        [&str, indent] (const lexeme_bool_t    &value) { str += indent + (value.value ? "true" : "false"); },
-        [&str, indent] (const lexeme_integer_t &value) { str += indent + std::to_string(value.value); },
-        [&str, indent] (const lexeme_double_t  &value) { str += indent + std::to_string(value.value); },
-        [&str, indent] (const lexeme_string_t  &value) { str += indent + "\"" + value.value + "\""; },
+        [&str, indent] (const lexeme_bool_t    &value) { str += indent + (value.value ? "true" : "false") + "\n"; },
+        [&str, indent] (const lexeme_integer_t &value) { str += indent + std::to_string(value.value) + "\n"; },
+        [&str, indent] (const lexeme_double_t  &value) { str += indent + std::to_string(value.value) + "\n"; },
+        [&str, indent] (const lexeme_string_t  &value) { str += indent + "\"" + value.value + "\"" + "\n"; },
         [&str, deep]   (std::shared_ptr<semantic_ident_t> value) { str += show_semantic_ident(*value, deep + 2); },
-        [&str, indent] (auto)                          { str += indent + "(unknown)"; },
+        [&str, indent] (auto)                          { str += indent + "(unknown)" + "\n"; },
       }, semantic_atom.atom);
-      str += "\n";
       return str;
     }
 
@@ -321,9 +321,9 @@ namespace lisp_utils {
     static std::string show_semantic_ident(const semantic_ident_t& semantic_ident, size_t deep) {
       std::string indent = std::string(deep, ' ');
       std::string str = indent + "semantic_ident: \n";
-      str += indent + "  name: " + semantic_ident.name + "\n";
+      str += indent + "  name:    " + semantic_ident.name + "\n";
       str += indent + "  pointer: " + std::to_string(semantic_ident.pointer) + "\n";
-      str += indent + "  this: " + std::to_string(reinterpret_cast<size_t>(&semantic_ident)) + "\n";
+      str += indent + "  this:    " + std::to_string(reinterpret_cast<size_t>(&semantic_ident)) + "\n";
       return str;
     }
 
@@ -430,7 +430,7 @@ namespace lisp_utils {
       }
     };
 
-    struct syntax_analyzer {
+    struct syntax_analyzer_t {
 
       syntax_tree_t parse(const lexemes_t& lexemes) {
         DEBUG_LOGGER_TRACE_ULISP;
@@ -452,7 +452,7 @@ namespace lisp_utils {
       }
     };
 
-    struct semantic_analyzer {
+    struct semantic_analyzer_t {
 
       semantic_tree_t parse(const syntax_tree_t& syntax_tree) {
         DEBUG_LOGGER_TRACE_ULISP;
@@ -702,7 +702,15 @@ namespace lisp_utils {
       }
     };
 
-    struct code_generator {
+    struct semantic_analyzer_advance_t {
+
+      semantic_tree_t parse(const semantic_tree_t& semantic_tree) {
+        DEBUG_LOGGER_TRACE_ULISP;
+        return semantic_tree;
+      }
+    };
+
+    struct code_generator_t {
     };
 
     void test() {
@@ -727,14 +735,21 @@ namespace lisp_utils {
         DEBUG_LOGGER_ULISP("lexemes: '\n%s'", str.c_str());
       }
 
-      auto syntax_tree = syntax_analyzer().parse(lexemes);
+      auto syntax_tree = syntax_analyzer_t().parse(lexemes);
 
       { // debug
         std::string str = show_syntax_tree(syntax_tree);
         DEBUG_LOGGER_ULISP("syntax_tree: '\n%s\n'", str.c_str());
       }
 
-      auto semantic_tree = semantic_analyzer().parse(syntax_tree);
+      auto semantic_tree = semantic_analyzer_t().parse(syntax_tree);
+
+      { // debug
+        std::string str = show_semantic_tree(semantic_tree);
+        DEBUG_LOGGER_ULISP("semantic_tree: '\n%s\n'", str.c_str());
+      }
+
+      /*auto*/ semantic_tree = semantic_analyzer_advance_t().parse(semantic_tree);
 
       { // debug
         std::string str = show_semantic_tree(semantic_tree);
