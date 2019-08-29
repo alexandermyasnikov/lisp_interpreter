@@ -1,12 +1,19 @@
 
 #include <iostream>
-#include <list>
+#include <variant>
+#include <vector>
 #include <regex>
+#include <list>
+#include "debug_logger.h"
 
 #define DEBUG_LOGGER_TRACE_ULISP          DEBUG_LOGGER("lisp ", logger_indent_ulisp_t::indent)
 #define DEBUG_LOGGER_ULISP(...)           DEBUG_LOG("lisp ", logger_indent_ulisp_t::indent, __VA_ARGS__)
 
-struct logger_indent_ulisp_t   : logger_indent_t<logger_indent_ulisp_t> { };
+template <typename T>
+struct logger_indent_t { static inline int indent = 0; };
+
+struct logger_indent_ulisp_t : logger_indent_t<logger_indent_ulisp_t> { };
+
 
 
 namespace lisp_utils {
