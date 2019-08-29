@@ -37,25 +37,28 @@
 
 
 grammar simple:
-  program       : stmt*
-  stmt          : BOOL | INT | DOUBLE | STRING | IDENT | list
-  list          : LP stmt* RP
+  program         : stmt*
+  stmt            : BOOL | INT | DOUBLE | STRING | IDENT | list
+  list            : LP stmt* RP
 
 
 grammar:
-  program       : def_stmt*
-  def_stmt      : LP __def IDENT lambda_stmt RP
-  lambda_stmt:  : LP __lambda LP IDENT* RP LP lambda_body* RP RP
-  lambda_body   : def_stmt | expr
-  expr          : atom | fun_stmt | if_stmt | lambda_stmt
-  fun_stmt      : LP IDENT expr* RP
-  if_stmt       : LP __if expr expr expr RP
-  atom          : BOOL | INT | DOUBLE | STRING | IDENT
+  program_stmt    : def_stmt*
+  def_stmt        : LP __def ident lambda_stmt RP
+  lambda_stmt     : LP __lambda LP ident* RP LP body_stmt* RP RP
+  body_stmt       : def_stmt | expr_stmt
+  expr_stmt       : if_stmt | lambda_stmt | call_stmt | atom
+  call_stmt       : LP fun_ident_stmt expr_stmt* RP
+  fun_ident_stmt  : ident | lambda_stmt
+  if_stmt         : LP __if expr_stmt expr_stmt expr_stmt RP
+  atom            : ident | const_value
+  ident           : IDENT
+  const_value     : BOOL | INT | DOUBLE | STRING
 
 
-(def fib (lambda (x)
-  ((def fib (lambda (a b x) (if (greater? x 0) (fib b (+ a b) (- x 1)) (b))))
-  (fib 1 1 x))))
+(__def fib (__lambda (x)
+  ((__def fib_inner (__lambda (a b x) ((__if (__greater? x 0) (fib_inner b (+ a b) (- x 1)) b))))
+  (fib_inner 1 1 x))))
 
 
 ( def 
@@ -359,8 +362,8 @@ new 08.16:
 
 
 (__def fib (__lambda (x)
-  ((__def fib (__lambda (a b x) (if (__greater? x 0) (fib b (+ a b) (- x 1)) (b))))
-  (fib 1 1 x))))
+  ((__def fib_inner (__lambda (a b x) ((__if (__greater? x 0) (fib_inner b (+ a b) (- x 1)) b))))
+  (fib_inner 1 1 x))))
 
 fib :
   call:
