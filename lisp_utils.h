@@ -615,61 +615,70 @@ namespace lisp_utils {
         DEBUG_LOGGER_TRACE_ULISP;
         std::visit(overloaded {
             [&syntax_tree, e, l] (std::shared_ptr<program_stmt_t> program_stmt) {
-              e(syntax_tree);
-              for (const auto& def : program_stmt->defs) {
-                for_each_syntax_tree(syntax_tree_t{def}, e, l);
+              if (e(syntax_tree)) {
+                for (const auto& def : program_stmt->defs) {
+                  for_each_syntax_tree(syntax_tree_t{def}, e, l);
+                }
               }
               l(syntax_tree);
             }, [&syntax_tree, e, l] (std::shared_ptr<def_stmt_t> def_stmt) {
-              e(syntax_tree);
-              for_each_syntax_tree(syntax_tree_t{def_stmt->name}, e, l);
-              for_each_syntax_tree(syntax_tree_t{def_stmt->fun}, e, l);
+              if (e(syntax_tree)) {
+                for_each_syntax_tree(syntax_tree_t{def_stmt->name}, e, l);
+                for_each_syntax_tree(syntax_tree_t{def_stmt->fun}, e, l);
+              }
               l(syntax_tree);
             }, [&syntax_tree, e, l] (std::shared_ptr<lambda_stmt_t> lambda_stmt) {
-              e(syntax_tree);
-              for (const auto& arg : lambda_stmt->args) {
-                for_each_syntax_tree(syntax_tree_t{arg}, e, l);
-              }
-              for (const auto& body : lambda_stmt->bodies) {
-                for_each_syntax_tree(syntax_tree_t{body}, e, l);
+              if (e(syntax_tree)) {
+                for (const auto& arg : lambda_stmt->args) {
+                  for_each_syntax_tree(syntax_tree_t{arg}, e, l);
+                }
+                for (const auto& body : lambda_stmt->bodies) {
+                  for_each_syntax_tree(syntax_tree_t{body}, e, l);
+                }
               }
               l(syntax_tree);
             }, [&syntax_tree, e, l] (std::shared_ptr<body_stmt_t> body_stmt) {
-              e(syntax_tree);
-              std::visit(overloaded {
-                  [&syntax_tree, e, l] (auto stmt) { for_each_syntax_tree(syntax_tree_t{stmt}, e, l); },
-              }, body_stmt->body);
+              if (e(syntax_tree)) {
+                std::visit(overloaded {
+                    [&syntax_tree, e, l] (auto stmt) { for_each_syntax_tree(syntax_tree_t{stmt}, e, l); },
+                }, body_stmt->body);
+              }
               l(syntax_tree);
             }, [&syntax_tree, e, l] (std::shared_ptr<expr_stmt_t> expr_stmt) {
-              e(syntax_tree);
-              std::visit(overloaded {
-                  [&syntax_tree, e, l] (auto stmt) { for_each_syntax_tree(syntax_tree_t{stmt}, e, l); },
-              }, expr_stmt->expr);
+              if (e(syntax_tree)) {
+                std::visit(overloaded {
+                    [&syntax_tree, e, l] (auto stmt) { for_each_syntax_tree(syntax_tree_t{stmt}, e, l); },
+                }, expr_stmt->expr);
+              }
               l(syntax_tree);
             }, [&syntax_tree, e, l] (std::shared_ptr<call_stmt_t> call_stmt) {
-              e(syntax_tree);
-              for_each_syntax_tree(syntax_tree_t{call_stmt->fun}, e, l);
-              for (const auto& arg : call_stmt->args) {
-                for_each_syntax_tree(syntax_tree_t{arg}, e, l);
+              if (e(syntax_tree)) {
+                for_each_syntax_tree(syntax_tree_t{call_stmt->fun}, e, l);
+                for (const auto& arg : call_stmt->args) {
+                  for_each_syntax_tree(syntax_tree_t{arg}, e, l);
+                }
               }
               l(syntax_tree);
             }, [&syntax_tree, e, l] (std::shared_ptr<fun_ident_stmt_t> fun_ident_stmt) {
-              e(syntax_tree);
-              std::visit(overloaded {
-                  [&syntax_tree, e, l] (auto stmt) { for_each_syntax_tree(syntax_tree_t{stmt}, e, l); },
-              }, fun_ident_stmt->fun);
+              if (e(syntax_tree)) {
+                std::visit(overloaded {
+                    [&syntax_tree, e, l] (auto stmt) { for_each_syntax_tree(syntax_tree_t{stmt}, e, l); },
+                }, fun_ident_stmt->fun);
+              }
               l(syntax_tree);
             }, [&syntax_tree, e, l] (std::shared_ptr<if_stmt_t> if_stmt) {
-              e(syntax_tree);
-              for_each_syntax_tree(syntax_tree_t{if_stmt->test_expr}, e, l);
-              for_each_syntax_tree(syntax_tree_t{if_stmt->then_expr}, e, l);
-              for_each_syntax_tree(syntax_tree_t{if_stmt->else_expr}, e, l);
+              if (e(syntax_tree)) {
+                for_each_syntax_tree(syntax_tree_t{if_stmt->test_expr}, e, l);
+                for_each_syntax_tree(syntax_tree_t{if_stmt->then_expr}, e, l);
+                for_each_syntax_tree(syntax_tree_t{if_stmt->else_expr}, e, l);
+              }
               l(syntax_tree);
             }, [&syntax_tree, e, l] (std::shared_ptr<atom_stmt_t> atom_stmt) {
-              e(syntax_tree);
-              std::visit(overloaded {
-                  [&syntax_tree, e, l] (auto stmt) { for_each_syntax_tree(syntax_tree_t{stmt}, e, l); },
-              }, atom_stmt->atom);
+              if (e(syntax_tree)) {
+                std::visit(overloaded {
+                    [&syntax_tree, e, l] (auto stmt) { for_each_syntax_tree(syntax_tree_t{stmt}, e, l); },
+                }, atom_stmt->atom);
+              }
               l(syntax_tree);
             }, [&syntax_tree, e, l] (std::shared_ptr<ident_t> /*ident*/) {
               e(syntax_tree);
@@ -688,7 +697,8 @@ namespace lisp_utils {
         size_t deep = 0;
         std::string str;
 
-        auto e = [&str, &deep](const syntax_tree_t& syntax_tree) {
+        auto e = [&str, &deep](const syntax_tree_t& syntax_tree) -> bool {
+          bool ret = true;
           std::visit(overloaded {
             [&str, &deep] (std::shared_ptr<program_stmt_t> /*program_stmt*/) {
               deep += 2;
@@ -738,13 +748,13 @@ namespace lisp_utils {
               deep += 2;
               std::visit(overloaded {
                   [&str, deep] (bool value) {
-                    str += std::string(deep + 2, ' ') + (value ? "true" : "else") + "\n";
+                    str += std::string(deep + 2, ' ') + "bool: " + (value ? "true" : "else") + "\n";
                   }, [&str, deep] (int64_t value) {
-                    str += std::string(deep + 2, ' ') + std::to_string(value) + "\n";
+                    str += std::string(deep + 2, ' ') + "int64_t: " + std::to_string(value) + "\n";
                   }, [&str, deep] (double  value) {
-                    str += std::string(deep + 2, ' ') + std::to_string(value) + "\n";
+                    str += std::string(deep + 2, ' ') + "double: " + std::to_string(value) + "\n";
                   }, [&str, deep] (std::string& value) {
-                    str += std::string(deep + 2, ' ') + "\"" + value + "\"" + "\n";
+                    str += std::string(deep + 2, ' ') + "string: " + "\"" + value + "\"" + "\n";
                   },
               }, const_value->const_value);
             },
@@ -752,6 +762,7 @@ namespace lisp_utils {
               throw std::runtime_error("show_syntax_tree: unknown type");
             }
           }, syntax_tree);
+          return ret;
         };
 
         auto l = [&str, &deep](const syntax_tree_t& syntax_tree) {
