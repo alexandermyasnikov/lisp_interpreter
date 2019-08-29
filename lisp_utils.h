@@ -223,6 +223,7 @@ namespace lisp_utils {
       }
 
       static std::string show_syntax_lisp_tree(const syntax_tree_lisp_t& syntax_tree_lisp) {
+        DEBUG_LOGGER_TRACE_ULISP;
         std::string str;
         std::visit(overloaded {
             [&str] (lexeme_list_sptr_t value) {
@@ -250,6 +251,7 @@ namespace lisp_utils {
       struct if_stmt_t;
       struct atom_stmt_t;
       struct ident_t;
+      struct const_value_t;
 
       using syntax_tree_t = std::variant<
         std::shared_ptr<program_stmt_t>,
@@ -261,12 +263,8 @@ namespace lisp_utils {
         std::shared_ptr<fun_ident_stmt_t>,
         std::shared_ptr<if_stmt_t>,
         std::shared_ptr<atom_stmt_t>,
-        std::shared_ptr<ident_t>>;
-
-      struct ident_t {
-        std::string name;
-        size_t pointer;
-      };
+        std::shared_ptr<ident_t>,
+        std::shared_ptr<const_value_t>>;
 
       struct program_stmt_t {
         std::vector<std::shared_ptr<def_stmt_t>> defs;
@@ -318,12 +316,23 @@ namespace lisp_utils {
 
       struct atom_stmt_t {
         using atom_t = std::variant<
+          std::shared_ptr<ident_t>,
+          std::shared_ptr<const_value_t>>;
+        atom_t atom;
+      };
+
+      struct ident_t {
+        std::string name;
+        size_t pointer;
+      };
+
+      struct const_value_t {
+        using type_t = std::variant<
           bool,
           int64_t,
           double,
-          std::string,
-          std::shared_ptr<ident_t>>;
-        atom_t atom;
+          std::string>;
+        type_t const_value;
       };
 
       using syntax_tree_lisp_t = syntax_analyzer_lisp_t::syntax_tree_lisp_t;
@@ -550,28 +559,49 @@ namespace lisp_utils {
       std::shared_ptr<atom_stmt_t> parse_atom(const syntax_tree_lisp_t& syntax_tree_lisp) {
         DEBUG_LOGGER_TRACE_ULISP;
 
+        try {
+          try {
+            auto ident = parse_ident(syntax_tree_lisp);
+            return std::make_shared<atom_stmt_t>(atom_stmt_t{ident});;
+          } catch (const std::exception& e) {
+            ;
+          }
+
+          try {
+            auto const_value = parse_const_value(syntax_tree_lisp);
+            return std::make_shared<atom_stmt_t>(atom_stmt_t{const_value});;
+          } catch (const std::exception& e) {
+            throw std::exception();
+          }
+
+        } catch (const std::exception& e) {
+          throw std::runtime_error("semantic_analyzer: expected atom_stmt");
+        }
+      }
+
+      std::shared_ptr<const_value_t> parse_const_value(const syntax_tree_lisp_t& syntax_tree_lisp) {
+        DEBUG_LOGGER_TRACE_ULISP;
+
         using lexeme_bool_t      = lexical_analyzer_t::lexeme_bool_t;
         using lexeme_integer_t   = lexical_analyzer_t::lexeme_integer_t;
         using lexeme_double_t    = lexical_analyzer_t::lexeme_double_t;
         using lexeme_string_t    = lexical_analyzer_t::lexeme_string_t;
 
         try {
+
           const auto& atom = std::get<lexeme_t>(syntax_tree_lisp);
           if (std::get_if<lexeme_bool_t>(&atom)) {
             auto value = std::get<lexeme_bool_t>(atom).value;
-            return std::make_shared<atom_stmt_t>(atom_stmt_t{value});;
+            return std::make_shared<const_value_t>(const_value_t{value});;
           } else if (std::get_if<lexeme_integer_t>(&atom)) {
             auto value = std::get<lexeme_integer_t>(atom).value;
-            return std::make_shared<atom_stmt_t>(atom_stmt_t{value});;
+            return std::make_shared<const_value_t>(const_value_t{value});;
           } else if (std::get_if<lexeme_double_t>(&atom)) {
             auto value = std::get<lexeme_double_t>(atom).value;
-            return std::make_shared<atom_stmt_t>(atom_stmt_t{value});;
+            return std::make_shared<const_value_t>(const_value_t{value});;
           } else if (std::get_if<lexeme_string_t>(&atom)) {
             auto value = std::get<lexeme_string_t>(atom).value;
-            return std::make_shared<atom_stmt_t>(atom_stmt_t{value});;
-          } else if (std::get_if<lexeme_ident_t>(&atom)) {
-            auto ident = parse_ident(syntax_tree_lisp);
-            return std::make_shared<atom_stmt_t>(atom_stmt_t{ident});;
+            return std::make_shared<const_value_t>(const_value_t{value});;
           } else {
             throw std::exception();
           }
@@ -581,88 +611,184 @@ namespace lisp_utils {
         }
       }
 
-      static std::string show_syntax_tree(const syntax_tree_t& syntax_tree, size_t deep = 0) {
-        std::string indent = std::string(deep, ' ');
-        std::string str;
+      static void for_each_syntax_tree(const syntax_tree_t& syntax_tree, auto e, auto l) {
+        DEBUG_LOGGER_TRACE_ULISP;
         std::visit(overloaded {
-            [&str, indent, deep] (std::shared_ptr<program_stmt_t> program_stmt) {
-              str += indent + "program_stmt: \n";
+            [&syntax_tree, e, l] (std::shared_ptr<program_stmt_t> program_stmt) {
+              e(syntax_tree);
               for (const auto& def : program_stmt->defs) {
-                str += show_syntax_tree(syntax_tree_t{def}, deep + 2);
+                for_each_syntax_tree(syntax_tree_t{def}, e, l);
               }
-            }, [&str, indent, deep] (std::shared_ptr<def_stmt_t> def_stmt) {
-              str += indent + "def_stmt: \n";
-              str += show_syntax_tree(syntax_tree_t{def_stmt->name}, deep + 2);
-              str += show_syntax_tree(syntax_tree_t{def_stmt->fun}, deep + 2);
-            }, [&str, indent, deep] (std::shared_ptr<lambda_stmt_t> lambda_stmt) {
-              str += indent + "lambda_stmt: \n";
-              str += indent + "  args: \n";
+              l(syntax_tree);
+            }, [&syntax_tree, e, l] (std::shared_ptr<def_stmt_t> def_stmt) {
+              e(syntax_tree);
+              for_each_syntax_tree(syntax_tree_t{def_stmt->name}, e, l);
+              for_each_syntax_tree(syntax_tree_t{def_stmt->fun}, e, l);
+              l(syntax_tree);
+            }, [&syntax_tree, e, l] (std::shared_ptr<lambda_stmt_t> lambda_stmt) {
+              e(syntax_tree);
               for (const auto& arg : lambda_stmt->args) {
-                str += show_syntax_tree(syntax_tree_t{arg}, deep + 4);
+                for_each_syntax_tree(syntax_tree_t{arg}, e, l);
               }
-              str += indent + "  body: \n";
               for (const auto& body : lambda_stmt->bodies) {
-                str += show_syntax_tree(syntax_tree_t{body}, deep + 4);
+                for_each_syntax_tree(syntax_tree_t{body}, e, l);
               }
-            }, [&str, indent, deep] (std::shared_ptr<body_stmt_t> body_stmt) {
-              str += indent + "body_stmt: \n";
+              l(syntax_tree);
+            }, [&syntax_tree, e, l] (std::shared_ptr<body_stmt_t> body_stmt) {
+              e(syntax_tree);
               std::visit(overloaded {
-                  [&str, indent, deep] (auto stmt) { str += show_syntax_tree(syntax_tree_t{stmt}, deep + 2); },
+                  [&syntax_tree, e, l] (auto stmt) { for_each_syntax_tree(syntax_tree_t{stmt}, e, l); },
               }, body_stmt->body);
-            }, [&str, indent, deep] (std::shared_ptr<expr_stmt_t> expr_stmt) {
-              str += indent + "expr_stmt_t: \n";
+              l(syntax_tree);
+            }, [&syntax_tree, e, l] (std::shared_ptr<expr_stmt_t> expr_stmt) {
+              e(syntax_tree);
               std::visit(overloaded {
-                  [&str, indent, deep] (auto stmt) { str += show_syntax_tree(syntax_tree_t{stmt}, deep + 2); },
+                  [&syntax_tree, e, l] (auto stmt) { for_each_syntax_tree(syntax_tree_t{stmt}, e, l); },
               }, expr_stmt->expr);
-            }, [&str, indent, deep] (std::shared_ptr<call_stmt_t> call_stmt) {
-              str += indent + "call_stmt: \n";
-              str += show_syntax_tree(syntax_tree_t{call_stmt->fun}, deep + 2);
+              l(syntax_tree);
+            }, [&syntax_tree, e, l] (std::shared_ptr<call_stmt_t> call_stmt) {
+              e(syntax_tree);
+              for_each_syntax_tree(syntax_tree_t{call_stmt->fun}, e, l);
               for (const auto& arg : call_stmt->args) {
-                str += show_syntax_tree(syntax_tree_t{arg}, deep + 2);
+                for_each_syntax_tree(syntax_tree_t{arg}, e, l);
               }
-            }, [&str, indent, deep] (std::shared_ptr<fun_ident_stmt_t> fun_ident_stmt) {
-              str += indent + "fun_ident_stmt: \n";
+              l(syntax_tree);
+            }, [&syntax_tree, e, l] (std::shared_ptr<fun_ident_stmt_t> fun_ident_stmt) {
+              e(syntax_tree);
               std::visit(overloaded {
-                  [&str, indent, deep] (auto stmt) { str += show_syntax_tree(syntax_tree_t{stmt}, deep + 2); },
+                  [&syntax_tree, e, l] (auto stmt) { for_each_syntax_tree(syntax_tree_t{stmt}, e, l); },
               }, fun_ident_stmt->fun);
-            }, [&str, indent, deep] (std::shared_ptr<if_stmt_t> if_stmt) {
-              str += indent + "if_stmt: \n";
-              str += show_syntax_tree(syntax_tree_t{if_stmt->test_expr}, deep + 2);
-              str += show_syntax_tree(syntax_tree_t{if_stmt->then_expr}, deep + 2);
-              str += show_syntax_tree(syntax_tree_t{if_stmt->else_expr}, deep + 2);
-            }, [&str, indent, deep] (std::shared_ptr<atom_stmt_t> atom_stmt) {
-              str += indent + "atom_stmt: \n";
+              l(syntax_tree);
+            }, [&syntax_tree, e, l] (std::shared_ptr<if_stmt_t> if_stmt) {
+              e(syntax_tree);
+              for_each_syntax_tree(syntax_tree_t{if_stmt->test_expr}, e, l);
+              for_each_syntax_tree(syntax_tree_t{if_stmt->then_expr}, e, l);
+              for_each_syntax_tree(syntax_tree_t{if_stmt->else_expr}, e, l);
+              l(syntax_tree);
+            }, [&syntax_tree, e, l] (std::shared_ptr<atom_stmt_t> atom_stmt) {
+              e(syntax_tree);
               std::visit(overloaded {
-                  [&str, indent, deep] (bool    value) {
-                    str += indent + "  " + (value ? "true" : "else") + "\n";
-                  }, [&str, indent, deep] (int64_t value) {
-                    str += indent + "  " + std::to_string(value) + "\n";
-                  }, [&str, indent, deep] (double  value) {
-                    str += indent + "  " + std::to_string(value) + "\n";
-                  }, [&str, indent, deep] (std::string& value) {
-                    str += indent + "  " + "\"" + value + "\"" + "\n";
-                  }, [&str, indent, deep] (std::shared_ptr<ident_t> value)  {
-                    str += show_syntax_tree(syntax_tree_t{value}, deep + 2);
-                  }, [&str, indent, deep] (auto) {
-                    str += indent + "(unknown)";
-                  },
+                  [&syntax_tree, e, l] (auto stmt) { for_each_syntax_tree(syntax_tree_t{stmt}, e, l); },
               }, atom_stmt->atom);
-            }, [&str, indent, deep] (std::shared_ptr<ident_t> ident) {
-              str += indent + "ident: \n";
-              str += indent + "  name: " + ident->name + "\n";
-              str += indent + "  pointer: " + std::to_string(ident->pointer) + "\n";
-            }, [&str, indent] (auto) { str += indent + "(unknown)" + "\n"; },
+              l(syntax_tree);
+            }, [&syntax_tree, e, l] (std::shared_ptr<ident_t> /*ident*/) {
+              e(syntax_tree);
+              l(syntax_tree);
+            }, [&syntax_tree, e, l] (std::shared_ptr<const_value_t> /*const_value*/) {
+              e(syntax_tree);
+              l(syntax_tree);
+            }, [&syntax_tree, e, l] (auto) {
+              throw std::runtime_error("for_each_syntax_tree: unknown type");
+            },
         }, syntax_tree);
+      }
+
+      static std::string show_syntax_tree(const syntax_tree_t& syntax_tree) {
+        DEBUG_LOGGER_TRACE_ULISP;
+        size_t deep = 0;
+        std::string str;
+
+        auto e = [&str, &deep](const syntax_tree_t& syntax_tree) {
+          std::visit(overloaded {
+            [&str, &deep] (std::shared_ptr<program_stmt_t> /*program_stmt*/) {
+              deep += 2;
+              str += std::string(deep, ' ') + "program_stmt_t: { \n";
+            },
+            [&str, &deep] (std::shared_ptr<def_stmt_t> /*def_stmt*/) {
+              deep += 2;
+              str += std::string(deep, ' ') + "def_stmt_t: { \n";
+            },
+            [&str, &deep] (std::shared_ptr<lambda_stmt_t> /*lambda_stmt*/) {
+              deep += 2;
+              str += std::string(deep, ' ') + "lambda_stmt_t: { \n";
+            },
+            [&str, &deep] (std::shared_ptr<body_stmt_t> /*body_stmt*/) {
+              deep += 2;
+              str += std::string(deep, ' ') + "body_stmt_t: { \n";
+            },
+            [&str, &deep] (std::shared_ptr<expr_stmt_t> /*expr_stmt*/) {
+              deep += 2;
+              str += std::string(deep, ' ') + "expr_stmt_t: { \n";
+            },
+            [&str, &deep] (std::shared_ptr<call_stmt_t> /*call_stmt*/) {
+              deep += 2;
+              str += std::string(deep, ' ') + "call_stmt_t: { \n";
+            },
+            [&str, &deep] (std::shared_ptr<fun_ident_stmt_t> /*fun_ident_stmt*/) {
+              deep += 2;
+              str += std::string(deep, ' ') + "fun_ident_stmt_t: { \n";
+            },
+            [&str, &deep] (std::shared_ptr<if_stmt_t> /*if_stmt*/) {
+              deep += 2;
+              str += std::string(deep, ' ') + "if_stmt_t: { \n";
+            },
+            [&str, &deep] (std::shared_ptr<atom_stmt_t> /*atom_stmt*/) {
+              deep += 2;
+              str += std::string(deep, ' ') + "atom_stmt_t: { \n";
+            },
+            [&str, &deep] (std::shared_ptr<ident_t> ident) {
+              deep += 2;
+              str += std::string(deep, ' ') + "ident_t: { \n";
+              str += std::string(deep, ' ') + "  name:    " + ident->name + "\n";
+              str += std::string(deep, ' ') + "  pointer: " + std::to_string(ident->pointer) + "\n";
+              str += std::string(deep, ' ') + "  this:    " +
+                  std::to_string(reinterpret_cast<size_t>(ident.get())) + "\n";
+            },
+            [&str, &deep] (std::shared_ptr<const_value_t> const_value) {
+              deep += 2;
+              std::visit(overloaded {
+                  [&str, deep] (bool value) {
+                    str += std::string(deep + 2, ' ') + (value ? "true" : "else") + "\n";
+                  }, [&str, deep] (int64_t value) {
+                    str += std::string(deep + 2, ' ') + std::to_string(value) + "\n";
+                  }, [&str, deep] (double  value) {
+                    str += std::string(deep + 2, ' ') + std::to_string(value) + "\n";
+                  }, [&str, deep] (std::string& value) {
+                    str += std::string(deep + 2, ' ') + "\"" + value + "\"" + "\n";
+                  },
+              }, const_value->const_value);
+            },
+            [] (auto) {
+              throw std::runtime_error("show_syntax_tree: unknown type");
+            }
+          }, syntax_tree);
+        };
+
+        auto l = [&str, &deep](const syntax_tree_t& syntax_tree) {
+          std::visit(overloaded {
+            [&str, &deep] (auto) {
+              str += std::string(deep, ' ') + "} \n";
+              deep -= 2;
+            }
+          }, syntax_tree);
+        };
+
+        for_each_syntax_tree(syntax_tree, e, l);
+
         return str;
       }
     };
 
-    struct semantic_analyzer_advance_t {
+    struct semantic_analyzer_t {
 
-      /*semantic_tree_t parse(const semantic_tree_t& semantic_tree) {
+      using syntax_tree_t = syntax_analyzer_t::syntax_tree_t; // TODO xxx_analyzer_t -> namespace
+      using ident_t = syntax_analyzer_t::ident_t;
+
+      static syntax_tree_t parse(const syntax_tree_t& syntax_tree) {
         DEBUG_LOGGER_TRACE_ULISP;
-        return semantic_tree;
-      }*/
+        auto tree = traversal_linking_idents(syntax_tree);
+        return tree;
+      }
+
+      static syntax_tree_t traversal_linking_idents(const syntax_tree_t& syntax_tree) {
+        DEBUG_LOGGER_TRACE_ULISP;
+
+        struct ident_table_t {
+          std::vector<std::shared_ptr<ident_t>> idents;
+        };
+
+        return syntax_tree;
+      }
     };
 
     struct code_generator_t {
@@ -697,18 +823,18 @@ namespace lisp_utils {
         DEBUG_LOGGER_ULISP("syntax_tree_lisp: '\n%s\n'", str.c_str());
       }
 
-      auto semantic_tree = syntax_analyzer_t().parse(syntax_tree_lisp);
+      auto syntax_tree = syntax_analyzer_t().parse(syntax_tree_lisp);
 
       { // debug
-        std::string str = syntax_analyzer_t::show_syntax_tree(semantic_tree);
+        std::string str = syntax_analyzer_t::show_syntax_tree(syntax_tree);
         DEBUG_LOGGER_ULISP("syntax_tree: '\n%s\n'", str.c_str());
       }
 
-      /*auto*/ // semantic_tree = semantic_analyzer_advance_t().parse(semantic_tree);
+      /*auto*/ syntax_tree = semantic_analyzer_t::parse(syntax_tree);
 
       { // debug
-        // std::string str = show_semantic_tree(semantic_tree);
-        // DEBUG_LOGGER_ULISP("semantic_tree: '\n%s\n'", str.c_str());
+        std::string str = syntax_analyzer_t::show_syntax_tree(syntax_tree);
+        DEBUG_LOGGER_ULISP("semantic_tree: '\n%s\n'", str.c_str());
       }
 
     }
