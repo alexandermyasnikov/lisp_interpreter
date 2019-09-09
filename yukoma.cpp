@@ -16,15 +16,21 @@ struct logger_indent_t { static inline int indent = 0; };
 
 struct logger_indent_ulisp_t : logger_indent_t<logger_indent_ulisp_t> { };
 
-enum : uint8_t {
+enum instruction_t : uint8_t {
   UNK,
   LABEL,
+  STRING,
   PUSH,
+  PUSH1,
   PUSHL,
   ADD,
   CALL,
   RET,
   INT,
+};
+
+enum sys_call_t : uint8_t {
+  PRINT,
 };
 
 
@@ -50,13 +56,17 @@ struct stream_t {
     stream.resize(size);
   }
 
+  size_t size() {
+    return stream.size();
+  }
+
   std::string hex() {
     std::stringstream ss;
     ss << "{ ";
     for (const auto b : stream) {
       ss << std::hex << std::setfill('0') << std::setw(2) << static_cast<uint32_t>(b) << " ";
     }
-    ss << "}";
+    ss << "} " << std::dec << stream.size() << "s";
     return ss.str();
   }
 };
@@ -70,11 +80,13 @@ struct analyzer_t {
   struct lexeme_empty_t   { };
   struct lexeme_integer_t { int         value; };
   struct lexeme_ident_t   { std::string value; };
+  struct lexeme_string_t  { std::string value; };
 
   using lexeme_t = std::variant<
     lexeme_empty_t,
     lexeme_integer_t,
-    lexeme_ident_t>;
+    lexeme_ident_t,
+    lexeme_string_t>;
 
   struct rule_t {
     std::regex   regex;
@@ -91,8 +103,11 @@ struct analyzer_t {
       std::regex("[-+]?\\d+"),
         [](const std::string& str) { return lexeme_integer_t{std::stoi(str)}; }
     }, {
-      std::regex("[\\w\\d_]+"),
+      std::regex("[\\w\\d_\\.]+"),
         [](const std::string& str) { return lexeme_ident_t{str}; }
+    }, {
+      std::regex("\".*?\""),
+        [](const std::string& str) { return lexeme_string_t{std::string(str.begin() + 1, str.end() - 2)}; }
     }
   };
 
@@ -135,6 +150,13 @@ struct analyzer_t {
           const auto& label = std::get<lexeme_ident_t>(lexemes.at(++i)).value;
           DEBUG_LOGGER_ULISP("LABEL %s", label.c_str());
           labels[label] = pos;
+        } else if (instruction == ".string") {
+          const auto& value = std::get<lexeme_string_t>(lexemes.at(++i)).value;
+          DEBUG_LOGGER_ULISP(".string \"%s\"", value.c_str());
+          {
+            data.write(pos, value.data(), value.size() + 1);
+            pos += sizeof(value.size() + 1);
+          }
         } else if (instruction == "PUSH") {
           const auto& value = std::get<lexeme_integer_t>(lexemes.at(++i)).value;
           DEBUG_LOGGER_ULISP("PUSH %d", value);
@@ -146,7 +168,18 @@ struct analyzer_t {
             data.write(pos, &val, sizeof(val));
             pos += sizeof(val);
           }
-        } else if (instruction == "PUSHF") {
+        } else if (instruction == "PUSH1") {
+          const auto& value = std::get<lexeme_integer_t>(lexemes.at(++i)).value;
+          DEBUG_LOGGER_ULISP("PUSH1 %d", value);
+          {
+            auto cmd = static_cast<uint8_t>(PUSH1);
+            data.write(pos, &cmd, sizeof(cmd));
+            pos += sizeof(cmd);
+            auto val = static_cast<uint8_t>(value);
+            data.write(pos, &val, sizeof(val));
+            pos += sizeof(val);
+          }
+        } else if (instruction == "PUSHL") {
           const auto& value = std::get<lexeme_ident_t>(lexemes.at(++i)).value;
           DEBUG_LOGGER_ULISP("PUSHL %s", value.c_str());
           {
@@ -180,7 +213,7 @@ struct analyzer_t {
             pos += sizeof(cmd);
           }
         } else {
-          throw std::runtime_error("unknown instruction");
+          throw std::runtime_error("unknown instruction 2");
         }
       }
     }
@@ -200,46 +233,109 @@ struct interpreter_t {
   stream_t data;
   stream_t stack;
 
+  stream_t in;
+  stream_t out;
+
   interpreter_t(const stream_t& data) : data(data) { }
 
   void run() {
     DEBUG_LOGGER_TRACE_ULISP;
 
-    // uint8_t& rip = stack[0];
-    // uint8_t& rbp = stack[1];
-    // rip = 100;
-    // rbp = sizeof(rip) + sizeof(rbp);
-
     // registers:
-    uint64_t rip = 100;
-    uint64_t rbp = 0;
-    uint64_t rsp = 0;
-    // stack.write(0, &rip, sizeof(rip));
-    // stack.write(0, &rbp, sizeof(rbp));
+    uint32_t ip = 0;
+    uint32_t bp = 0;
+    uint32_t sp = 0;
+
+    stack.write(sp, &ip, sizeof(ip));
+    sp += sizeof(ip);
+    stack.write(sp, &bp, sizeof(bp));
+    sp += sizeof(bp);
+    bp = sp;
 
     DEBUG_LOGGER_ULISP("data: %s", data.hex().c_str());
 
-    while (rip) {
+    while (true) {
+      DEBUG_LOGGER_ULISP("");
       DEBUG_LOGGER_ULISP("stack: %s", stack.hex().c_str());
-      DEBUG_LOGGER_ULISP("rip: %x %d", rip, rip);
-      DEBUG_LOGGER_ULISP("rbp: %x", rbp);
+      DEBUG_LOGGER_ULISP("ip: %x", ip);
+      DEBUG_LOGGER_ULISP("bp: %x", bp);
+      DEBUG_LOGGER_ULISP("sp: %x", sp);
+
       uint8_t cmd;
-      // stack.read(rip, &cmd, sizeof(cmd));
-      data.read(rip, &cmd, sizeof(cmd));
+      data.read(ip, &cmd, sizeof(cmd));
       DEBUG_LOGGER_ULISP("cmd: %hhx", cmd);
-      rip += sizeof(cmd);
+      ip += sizeof(cmd);
 
       switch(cmd) {
+        case PUSHL:
         case PUSH: {
-          uint64_t op1;
-          data.read(rip, &op1, sizeof(op1));
-          rip += sizeof(op1);
-          stack.write(rsp, &op1, sizeof(op1));
-          rsp += sizeof(op1);
-          DEBUG_LOGGER_ULISP("PUSH: %x", op1);
+          uint32_t op1;
+          data.read(ip, &op1, sizeof(op1));
+          ip += sizeof(op1);
+          stack.write(sp, &op1, sizeof(op1));
+          sp += sizeof(op1);
+          DEBUG_LOGGER_ULISP("PUSHX: %x", op1);
           break;
         }
-        case ADD: {
+        case PUSH1: {
+          uint8_t op1;
+          data.read(ip, &op1, sizeof(op1));
+          ip += sizeof(op1);
+          stack.write(sp, &op1, sizeof(op1));
+          sp += sizeof(op1);
+          DEBUG_LOGGER_ULISP("PUSH1: %hhx", op1);
+          break;
+        }
+        case CALL: {
+          uint32_t op1;
+          stack.read(sp - sizeof(op1), &op1, sizeof(op1));
+
+          stack.write(sp, &ip, sizeof(ip));
+          sp += sizeof(ip);
+          ip = op1;
+
+          stack.write(sp, &bp, sizeof(bp));
+          sp += sizeof(bp);
+          bp = sp;
+          DEBUG_LOGGER_ULISP("CALL");
+          break;
+        }
+        case RET: {
+          uint32_t ip_orig;
+          uint32_t bp_orig;
+          stack.resize(bp);
+          sp = bp;
+          stack.read(sp - sizeof(bp_orig), &bp_orig, sizeof(bp_orig));
+          sp -= sizeof(bp_orig);
+          stack.read(sp - sizeof(ip_orig), &ip_orig, sizeof(ip_orig));
+          sp -= sizeof(ip_orig);
+          stack.resize(sp);
+          ip = ip_orig;
+          bp = bp_orig;
+          DEBUG_LOGGER_ULISP("RET");
+          break;
+        }
+        case INT: {
+          uint32_t op1;
+          stack.read(sp - sizeof(op1), &op1, sizeof(op1));
+          sp -= sizeof(op1);
+
+          switch (op1) {
+            case PRINT: {
+              uint8_t op1;
+              stack.read(sp - sizeof(op1), &op1, sizeof(op1));
+              sp -= sizeof(op1);
+              out.write(out.size(), &op1, sizeof(op1));
+              break;
+            }
+            default : {
+              break;
+            }
+          }
+          DEBUG_LOGGER_ULISP("INT");
+          break;
+        }
+        /*case ADD: {
           uint64_t op1;
           uint64_t op2;
           stack.read(rsp - sizeof(op2), &op2, sizeof(op2));
@@ -250,61 +346,67 @@ struct interpreter_t {
           uint64_t ret = op1 + op2;
           stack.write(rsp, &ret, sizeof(ret));
           break;
-        }
-        default: throw std::runtime_error("unknown instruction");
+        }*/
+        default: throw std::runtime_error("unknown instruction 1");
       }
-      // break;
+
+      if (!ip) break;
     }
   }
 };
 
-static std::vector<uint8_t> test_data = {
-  0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-  0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-  0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-  0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-  0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-  0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-  0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-  0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-  0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-  0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-  PUSH, 0x05, 0x00, 0x00, 0x00, /*arg1*/
-  PUSH, 0x02, 0x00, 0x00, 0x00, /*arg2*/
-  PUSH, 0x03, 0x00, 0x00, 0x00, /*func_pointer*/
-  // RET,
-};
 
-/*
-
-stack:
-  10
-*/
-
-// PUSH <value>
-// APUSH <src> <value>
-// RPUSH <src> <value>
-// COPY <src> <dst>
-// flag: value | absolute_ptr | relative_ptr
 
 int main() {
   std::string code = R"ASM(
     LABEL main
       PUSH 5
       PUSH 2
-      PUSHF sum
+      PUSHL sum
+      CALL
+      PUSHL test_print
+      CALL
+      RET
+
+    LABEL hello_str
+      .string "Hello, World!"
+
+    LABEL mul
+      PUSH 21
+      INT
       RET
 
     LABEL sum
-      PUSH 1
+      PUSH 20
       INT
       RET
+
+    LABEL test_print
+      PUSH1 72              ; 'H'
+      PUSHL __print_char
+      CALL
+      PUSH1 105             ; 'i'
+      PUSHL __print_char
+      CALL
+      PUSH1 33              ; '!'
+      PUSHL __print_char
+      CALL
+      RET
+
+    LABEL __print_char
+      PUSH 0                ; syscall PRINT
+      INT
+      RET
+
     )ASM";
 
   auto data = analyzer_t::parse(code);
 
   interpreter_t interpreter(data);
   interpreter.run();
+
+  std::cout << "in:  " << interpreter.in.hex() << std::endl;
+  std::cout << "out: " << interpreter.out.hex() << std::endl;
 
   return 0;
 }
