@@ -710,15 +710,121 @@ namespace lisp_utils {
             [&str, &deep] (std::shared_ptr<program_stmt_t> /*program_stmt*/) {
               deep += 2;
               str += std::string(deep, ' ') + "program_stmt_t: { \n";
-            },
-            [&str, &deep] (std::shared_ptr<def_stmt_t> /*def_stmt*/) {
+            }, [&str, &deep] (std::shared_ptr<def_stmt_t> /*def_stmt*/) {
               deep += 2;
               str += std::string(deep, ' ') + "def_stmt_t: { \n";
-            },
-            [&str, &deep] (std::shared_ptr<lambda_stmt_t> /*lambda_stmt*/) {
+            }, [&str, &deep] (std::shared_ptr<lambda_stmt_t> /*lambda_stmt*/) {
               deep += 2;
               str += std::string(deep, ' ') + "lambda_stmt_t: { \n";
+            }, [&str, &deep] (std::shared_ptr<body_stmt_t> /*body_stmt*/) {
+              deep += 2;
+              str += std::string(deep, ' ') + "body_stmt_t: { \n";
+            }, [&str, &deep] (std::shared_ptr<expr_stmt_t> /*expr_stmt*/) {
+              deep += 2;
+              str += std::string(deep, ' ') + "expr_stmt_t: { \n";
+            }, [&str, &deep] (std::shared_ptr<call_stmt_t> /*call_stmt*/) {
+              deep += 2;
+              str += std::string(deep, ' ') + "call_stmt_t: { \n";
+            }, [&str, &deep] (std::shared_ptr<fun_ident_stmt_t> /*fun_ident_stmt*/) {
+              deep += 2;
+              str += std::string(deep, ' ') + "fun_ident_stmt_t: { \n";
+            }, [&str, &deep] (std::shared_ptr<if_stmt_t> /*if_stmt*/) {
+              deep += 2;
+              str += std::string(deep, ' ') + "if_stmt_t: { \n";
+            }, [&str, &deep] (std::shared_ptr<atom_stmt_t> /*atom_stmt*/) {
+              deep += 2;
+              str += std::string(deep, ' ') + "atom_stmt_t: { \n";
+            }, [&str, &deep] (std::shared_ptr<ident_t> ident) {
+              deep += 2;
+              str += std::string(deep, ' ') + "ident_t: { \n";
+              str += std::string(deep, ' ') + "  name:    " + ident->name + "\n";
+              str += std::string(deep, ' ') + "  pointer: " + std::to_string(ident->pointer) + "\n";
+              str += std::string(deep, ' ') + "  this:    " +
+                  std::to_string(reinterpret_cast<size_t>(ident.get())) + "\n";
+            }, [&str, &deep] (std::shared_ptr<const_value_t> const_value) {
+              deep += 2;
+              str += std::string(deep, ' ') + "const_value_t: { \n";
+              std::visit(overloaded {
+                  [&str, deep] (bool value) {
+                    str += std::string(deep + 2, ' ') + "bool: " + (value ? "true" : "else") + "\n";
+                  }, [&str, deep] (int64_t value) {
+                    str += std::string(deep + 2, ' ') + "int64_t: " + std::to_string(value) + "\n";
+                  }, [&str, deep] (double  value) {
+                    str += std::string(deep + 2, ' ') + "double: " + std::to_string(value) + "\n";
+                  }, [&str, deep] (std::string& value) {
+                    str += std::string(deep + 2, ' ') + "string: " + "\"" + value + "\"" + "\n";
+                  },
+              }, const_value->const_value);
+            }, [] (auto) {
+              throw std::runtime_error("show_syntax_tree: unknown type");
+            }
+          }, syntax_tree);
+          return ret;
+        };
+
+        auto l = [&str, &deep](const syntax_tree_t& syntax_tree) {
+          std::visit(overloaded {
+            [&str, &deep] (auto) {
+              str += std::string(deep, ' ') + "} \n";
+              deep -= 2;
+            }
+          }, syntax_tree);
+        };
+
+        for_each_syntax_tree(syntax_tree, e, l);
+
+        return str;
+      }
+    };
+
+    struct semantic_analyzer_t {
+
+      using syntax_tree_t = syntax_analyzer_t::syntax_tree_t; // TODO xxx_analyzer_t -> namespace
+      using ident_t = syntax_analyzer_t::ident_t;
+      using lambda_stmt_t = syntax_analyzer_t::lambda_stmt_t;
+      using const_value_t = syntax_analyzer_t::const_value_t;
+      using def_stmt_t = syntax_analyzer_t::def_stmt_t;
+
+      static syntax_tree_t parse(const syntax_tree_t& syntax_tree) {
+        DEBUG_LOGGER_TRACE_ULISP;
+        auto tree = traversal_linking_idents(syntax_tree);
+        return tree;
+      }
+
+      static syntax_tree_t traversal_linking_idents(const syntax_tree_t& syntax_tree) {
+        DEBUG_LOGGER_TRACE_ULISP;
+
+        struct lambda_idents_t {
+          // std::vector<std::shared_ptr<ident_t>> args;
+          std::vector<std::shared_ptr<ident_t>> idents;
+        };
+
+        struct ident_table_t {
+          std::vector<lambda_idents_t>   lambda_idents = { { } };
+          std::vector<std::pair<std::shared_ptr<ident_t>, std::shared_ptr<lambda_stmt_t>>>   functions;
+          std::vector<std::pair<std::shared_ptr<ident_t>, std::shared_ptr<const_value_t>>>   constants;
+        };
+
+        ident_table_t table;
+
+        // Plan:
+        // Все ident_t должны ссылаться на аргумент лямбда функции или глобальную функцию
+        // Все функции нужно сделать глобальными
+        // Все константы нужно определить как ident_t
+
+        auto e = [&table](const syntax_tree_t& syntax_tree) -> bool {
+          bool ret = true;
+          std::visit(overloaded {
+            // [&str, &deep] (std::shared_ptr<program_stmt_t> /*program_stmt*/) {
+            [&table] (std::shared_ptr<def_stmt_t> def_stmt) {
+              table.functions.push_back({def_stmt->name, def_stmt->fun});
+              table.lambda_idents.back().idents.push_back(def_stmt->name);
+              DEBUG_LOGGER_ULISP("INFO: def: '%s'", def_stmt->name->name.c_str());
             },
+            [&table] (std::shared_ptr<lambda_stmt_t> /*lambda_stmt*/) {
+              table.lambda_idents.push_back({});
+            },
+#if 0
             [&str, &deep] (std::shared_ptr<body_stmt_t> /*body_stmt*/) {
               deep += 2;
               str += std::string(deep, ' ') + "body_stmt_t: { \n";
@@ -765,45 +871,20 @@ namespace lisp_utils {
                   },
               }, const_value->const_value);
             },
-            [] (auto) {
-              throw std::runtime_error("show_syntax_tree: unknown type");
-            }
+#endif
+            [] (auto) { }
           }, syntax_tree);
           return ret;
         };
 
-        auto l = [&str, &deep](const syntax_tree_t& syntax_tree) {
+        auto l = [&table](const syntax_tree_t& syntax_tree) {
           std::visit(overloaded {
-            [&str, &deep] (auto) {
-              str += std::string(deep, ' ') + "} \n";
-              deep -= 2;
+            [&table] (auto) {
             }
           }, syntax_tree);
         };
 
-        for_each_syntax_tree(syntax_tree, e, l);
-
-        return str;
-      }
-    };
-
-    struct semantic_analyzer_t {
-
-      using syntax_tree_t = syntax_analyzer_t::syntax_tree_t; // TODO xxx_analyzer_t -> namespace
-      using ident_t = syntax_analyzer_t::ident_t;
-
-      static syntax_tree_t parse(const syntax_tree_t& syntax_tree) {
-        DEBUG_LOGGER_TRACE_ULISP;
-        auto tree = traversal_linking_idents(syntax_tree);
-        return tree;
-      }
-
-      static syntax_tree_t traversal_linking_idents(const syntax_tree_t& syntax_tree) {
-        DEBUG_LOGGER_TRACE_ULISP;
-
-        struct ident_table_t {
-          std::vector<std::shared_ptr<ident_t>> idents;
-        };
+        syntax_analyzer_t::for_each_syntax_tree(syntax_tree, e, l);
 
         return syntax_tree;
       }
