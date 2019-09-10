@@ -10,16 +10,16 @@
 Аргументы функции - указатели на данные.
 
 
-( def 
-  filter 
-  ( lambda 
-    ( f l ) 
+( def
+  filter
+  ( lambda
+    ( f l )
     ( ( def $1 (lambda () ( iter f l ( ) ) ) )
       ( def $0 (lambda () ( reverse $1 ) ) )
-      ( def 
-        iter 
+      ( def
+        iter
         ( lambda                                                 ; + context
-          ( f l res ) 
+          ( f l res )
           ( ( def $11 (lambda () ( id res ) ) )                  ; context.idents[11]
             ( def $10 (lambda () ( id l ) ) )                    ; context.idents[10]
             ( def $9  (lambda () ( id f ) ) )                    ; context.idents[9]
@@ -33,7 +33,7 @@
             ( def $1  (lambda () ( nil? $10 ) ) )                ; context.idents[1]
             ( def $0  (lambda () ( if $1 $11 $2 ) ) )            ; context.idents[0]
             $0 ) ) )                                             ; rax
-      $0 ) ) ) 
+      $0 ) ) )
 
 
 grammar simple:
@@ -61,32 +61,32 @@ grammar:
   (fib_inner 1 1 x))))
 
 
-( def 
-  filter 
-  ( lambda 
-    ( f l ) 
-    ( ( def 
-        iter 
-        ( lambda 
-          ( f l res ) 
-          ( ( if 
-              ( nil? l ) 
-              res 
-              ( iter 
-                f 
-                ( tail l ) 
-                ( if 
-                  ( f 
-                    ( head l ) ) 
-                  ( cons 
-                    ( head l ) 
-                    res ) 
-                  res ) ) ) ) ) ) 
-      ( reverse 
-        ( iter 
-          f 
-          l 
-          ( ) ) ) ) ) ) 
+( def
+  filter
+  ( lambda
+    ( f l )
+    ( ( def
+        iter
+        ( lambda
+          ( f l res )
+          ( ( if
+              ( nil? l )
+              res
+              ( iter
+                f
+                ( tail l )
+                ( if
+                  ( f
+                    ( head l ) )
+                  ( cons
+                    ( head l )
+                    res )
+                  res ) ) ) ) ) )
+      ( reverse
+        ( iter
+          f
+          l
+          ( ) ) ) ) ) )
 
 stack:
 |---------|
@@ -180,7 +180,7 @@ parse: string -> { object_t }
 prepare: (lambda ...) -> { object_t }
 prepare: (macro ...) -> { object_t }
 prepare: args: x, y, ... -> args: $0, $1, ...
-eval: { object_t } -> value 
+eval: { object_t } -> value
 
 
 (def sum (lambda (x y) (+ x y)))
@@ -311,7 +311,7 @@ new 07.24:
     ...
 
 shared_ptr<T>:
-  T* value 
+  T* value
   size_t* count
 
 
@@ -350,60 +350,234 @@ new 08.16:
     name: string
     type
     value
-  
+
   type:
     [ attribute ]
     [ value ]
     [ operation ]
   ex: number, double, bool, char, string, pointer, enum, struct, array, vector, union, set, list, map
-    
+
   // Отделить описание типа от данных для добавления пользовательских
 
+new 08.31:
+  type:
+    uint64_t   sizeof(type) == 8
+    double     sizeof(type) == 8
+    все другие строются поверх uint64_t, в том числе reinterpret_cast
+
+  operation:
+    add    : int
+    sub    : int
+    mult   : int
+    dev    : int
+    dereference operator
+    reference
+    call
+    ret
+    cp
+    jmp
 
 
 (__def fib (__lambda (x)
   ((__def fib_inner (__lambda (a b x) ((__if (__greater? x 0) (fib_inner b (+ a b) (- x 1)) b))))
   (fib_inner 1 1 x))))
 
-fib :
-  call:
-    fun: fib::fib
-    args: 1 1 $0
-
-fib::fib :
-  if_condition:
-    call:
-      fun: greater?
-      args:
-        expr:
-          $2
-        expr:
-          0
-  then_body:
-    call:
-      fun: fib::fib
-      args:
-        expr:
-          $1
-        expr:
-          call:
-            fun: +
-            args:
-              expr:
-                $0
-              expr:
-                $1
-        expr:
-          call:
-            fun: -
-            args:
-              expr:
-                $2
-              expr:
-                1
-  else_body:
-    expr:
-      $1
+  program_stmt_t: {
+    def_stmt_t: {
+      ident_t: {
+        name:    fib
+        pointer: 0
+        this:    94683237526432
+      }
+      lambda_stmt_t: {
+        ident_t: {
+          name:    x
+          pointer: 0
+          this:    94683237528944
+        }
+        body_stmt_t: {
+          def_stmt_t: {
+            ident_t: {
+              name:    fib_inner
+              pointer: 0
+              this:    94683237529008
+            }
+            lambda_stmt_t: {
+              ident_t: {
+                name:    a
+                pointer: 0
+                this:    94683237529072
+              }
+              ident_t: {
+                name:    b
+                pointer: 0
+                this:    94683237529136
+              }
+              ident_t: {
+                name:    x
+                pointer: 0
+                this:    94683237529200
+              }
+              body_stmt_t: {
+                expr_stmt_t: {
+                  if_stmt_t: {
+                    expr_stmt_t: {
+                      call_stmt_t: {
+                        fun_ident_stmt_t: {
+                          ident_t: {
+                            name:    __greater?
+                            pointer: 0
+                            this:    94683237529488
+                          }
+                        }
+                        expr_stmt_t: {
+                          atom_stmt_t: {
+                            ident_t: {
+                              name:    x
+                              pointer: 0
+                              this:    94683237529712
+                            }
+                          }
+                        }
+                        expr_stmt_t: {
+                          atom_stmt_t: {
+                            const_value_t: {
+                              int64_t: 0
+                            }
+                          }
+                        }
+                      }
+                    }
+                    expr_stmt_t: {
+                      call_stmt_t: {
+                        fun_ident_stmt_t: {
+                          ident_t: {
+                            name:    fib_inner
+                            pointer: 0
+                            this:    94683237530048
+                          }
+                        }
+                        expr_stmt_t: {
+                          atom_stmt_t: {
+                            ident_t: {
+                              name:    b
+                              pointer: 0
+                              this:    94683237530160
+                            }
+                          }
+                        }
+                        expr_stmt_t: {
+                          call_stmt_t: {
+                            fun_ident_stmt_t: {
+                              ident_t: {
+                                name:    +
+                                pointer: 0
+                                this:    94683237530384
+                              }
+                            }
+                            expr_stmt_t: {
+                              atom_stmt_t: {
+                                ident_t: {
+                                  name:    a
+                                  pointer: 0
+                                  this:    94683237530496
+                                }
+                              }
+                            }
+                            expr_stmt_t: {
+                              atom_stmt_t: {
+                                ident_t: {
+                                  name:    b
+                                  pointer: 0
+                                  this:    94683237530688
+                                }
+                              }
+                            }
+                          }
+                        }
+                        expr_stmt_t: {
+                          call_stmt_t: {
+                            fun_ident_stmt_t: {
+                              ident_t: {
+                                name:    -
+                                pointer: 0
+                                this:    94683237531056
+                              }
+                            }
+                            expr_stmt_t: {
+                              atom_stmt_t: {
+                                ident_t: {
+                                  name:    x
+                                  pointer: 0
+                                  this:    94683237531168
+                                }
+                              }
+                            }
+                            expr_stmt_t: {
+                              atom_stmt_t: {
+                                const_value_t: {
+                                  int64_t: 1
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                    expr_stmt_t: {
+                      atom_stmt_t: {
+                        ident_t: {
+                          name:    b
+                          pointer: 0
+                          this:    94683237531664
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+        body_stmt_t: {
+          expr_stmt_t: {
+            call_stmt_t: {
+              fun_ident_stmt_t: {
+                ident_t: {
+                  name:    fib_inner
+                  pointer: 0
+                  this:    94683237532176
+                }
+              }
+              expr_stmt_t: {
+                atom_stmt_t: {
+                  const_value_t: {
+                    int64_t: 1
+                  }
+                }
+              }
+              expr_stmt_t: {
+                atom_stmt_t: {
+                  const_value_t: {
+                    int64_t: 1
+                  }
+                }
+              }
+              expr_stmt_t: {
+                atom_stmt_t: {
+                  ident_t: {
+                    name:    x
+                    pointer: 0
+                    this:    94683237532688
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
 
 
 defun:
@@ -426,5 +600,83 @@ void fibr( x ) {
   }
   return $2;
 }
+
+
+sum: \ x y z -> x + y + z
+max: \ x y   -> if x > y then x else y
+f:   \ x     -> sum(1 max(x 3) 4)
+main: \ -> f(5)
+
+main:
+  push 5
+  push 1
+  push <f>
+  call
+  ret
+
+f:
+  push 1
+  push x
+  push 3
+  push 2
+  push <max>
+  call
+  push 4
+  call sum
+  ret
+
+max:
+  push x
+  push y
+  >
+  M1
+  BF
+  x
+  M2
+  BRL
+  y    :M1
+  ret  :M2
+
+sum:
+  push x
+  push y
+  +
+  push z
+  +
+  ret
+
+stack:
+  10
+
+
+
+sum:  \ x y z -> x + y + z
+max:  \ x y   -> if x > y then x else y
+f:    \ x     -> sum(1 max(x 3) 4)
+main: \ -> f(5)
+
+
+
+
+
+
+BF:
+    add    : int
+    sub    : int
+    mult   : int
+    dev    : int
+    dadd    : double
+    dsub    : double
+    dmult   : double
+    ddev    : double
+    dereference operator
+    reference
+    call    : push <rip>   cp xxx <rip>
+    ret     :
+    cp
+    jmp
+
+
+
 
 
