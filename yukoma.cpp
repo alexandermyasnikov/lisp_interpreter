@@ -21,7 +21,6 @@ enum instruction_t : uint8_t {
   LABEL,
   STRING,
   PUSH,
-  PUSH1,
   PUSHL,
   ADD,
   CALL,
@@ -168,17 +167,6 @@ struct analyzer_t {
             data.write(pos, &val, sizeof(val));
             pos += sizeof(val);
           }
-        } else if (instruction == "PUSH1") {
-          const auto& value = std::get<lexeme_integer_t>(lexemes.at(++i)).value;
-          DEBUG_LOGGER_ULISP("PUSH1 %d", value);
-          {
-            auto cmd = static_cast<uint8_t>(PUSH1);
-            data.write(pos, &cmd, sizeof(cmd));
-            pos += sizeof(cmd);
-            auto val = static_cast<uint8_t>(value);
-            data.write(pos, &val, sizeof(val));
-            pos += sizeof(val);
-          }
         } else if (instruction == "PUSHL") {
           const auto& value = std::get<lexeme_ident_t>(lexemes.at(++i)).value;
           DEBUG_LOGGER_ULISP("PUSHL %s", value.c_str());
@@ -277,15 +265,6 @@ struct interpreter_t {
           DEBUG_LOGGER_ULISP("PUSHX: %x", op1);
           break;
         }
-        case PUSH1: {
-          uint8_t op1;
-          data.read(ip, &op1, sizeof(op1));
-          ip += sizeof(op1);
-          stack.write(sp, &op1, sizeof(op1));
-          sp += sizeof(op1);
-          DEBUG_LOGGER_ULISP("PUSH1: %hhx", op1);
-          break;
-        }
         case CALL: {
           uint32_t op1;
           stack.read(sp - sizeof(op1), &op1, sizeof(op1));
@@ -322,7 +301,7 @@ struct interpreter_t {
 
           switch (op1) {
             case PRINT: {
-              uint8_t op1;
+              uint32_t op1;
               stack.read(sp - sizeof(op1), &op1, sizeof(op1));
               sp -= sizeof(op1);
               out.write(out.size(), &op1, sizeof(op1));
@@ -382,13 +361,13 @@ int main() {
       RET
 
     LABEL test_print
-      PUSH1 72              ; 'H'
+      PUSH 72              ; 'H'
       PUSHL __print_char
       CALL
-      PUSH1 105             ; 'i'
+      PUSH 105             ; 'i'
       PUSHL __print_char
       CALL
-      PUSH1 33              ; '!'
+      PUSH 33              ; '!'
       PUSHL __print_char
       CALL
       RET
