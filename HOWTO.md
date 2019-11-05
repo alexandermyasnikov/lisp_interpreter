@@ -129,7 +129,6 @@ $2:
 
 
 
-
 registers?:
 flags? - for test - branch
 pc     - program counter
@@ -675,6 +674,112 @@ BF:
     ret     :
     cp
     jmp
+
+
+
+std::string code = R"LISP(
+  (defun sum3 auto
+    (int x int y int z) )               ; declaration
+
+  (defun id auto
+    (auto x)
+    ( ... ) )
+
+  (defun sum3 auto
+    (int x int y int z)
+    ( (def t
+      (+ x (+ y z) ) )
+    (id t) ) )
+
+  (defun main auto
+    ()
+    ( (def x 10)
+      (def y 11)
+      (def z 12)
+      (def s (sum3 x y z) )
+      (set s (sum3 s s s) )
+      (id s) ) )
+  )LISP";
+
+rpn:
+
+sum3: int x -> int y -> int z -> int
+  t x y z + call + call def
+  t id call
+
+main: int
+  x 10 def
+  y 11 def
+  z 12 def
+  s x y z sum3 call def
+  s s s s sum3 call set
+  s id call
+
+
+
+new 10.21:
+
+  sum(1, 2 + 3, 4)
+
+  CALL
+    fname: sum
+    count: 3
+    arg:
+      NUM 1
+    arg:
+      CALL
+      fname: +
+      count: 2
+      arg:
+        NUM 2
+        NUM 3
+    arg:
+      NUM 4
+
+
+  sum 3 1 NUM 1 plus 2 NUM 2 NUM 3 CALL NUM 4 CALL
+
+  tree:
+    [<node_p> <cmd>]
+    node: [u64:value], u64:parent, u64:child_count, [u64:child] -> u64:index
+
+
+
+new 11.04:
+
+  value_on_heap: u8:type, u32:count, u8*:data
+  value_on_stack: u64:pointer
+  type_info: [u32:type, u8:size, u64:ctor, u64:dtor, ...]
+  function:
+    (__new <type> <name> <args...>)
+    (__clone <name> <name>)
+
+  (h (f x y) (f x y) (f y x))
+  ->  (set v0 (f x y))
+      (set v1 (f x y))
+      (set v2 (f y x))
+      (set v3 (h v0 v1 v2))
+
+  (defun f (x y)
+    (__add x (__mul y y) ) )
+  ->  f:
+        args_count: 2
+      body:
+        PUSH $1 PUSH $2 PUSH $2 PUSH __mul CALL PUSH __add CALL ; $i = _ + i * sizeof(value)
+
+  ; int64_t, double, char (byte), object, pointer of function
+  (type array_10 as array of 10)            ; object array[10];
+  (type array_11 as raw_array of 10)        ; byte   array[10];
+  ; (type person as struct of id name age)
+
+
+
+
+
+
+
+
+
 
 
 

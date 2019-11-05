@@ -16,6 +16,166 @@ struct logger_indent_t { static inline int indent = 0; };
 
 struct logger_indent_ulisp_t : logger_indent_t<logger_indent_ulisp_t> { };
 
+
+namespace yukoma {
+
+  using pointer_t = uint32_t;
+
+  enum instruction_t : uint8_t {
+    UNK,
+    CALL,
+    RET,
+    PUSH,
+    POP,
+    MOVE,
+    INT,
+  };
+
+  enum type_t : uint8_t {
+    VOID,
+    DOUBLE,
+    INTEGER,
+    CHAR,
+    RAW_DATA,
+    FUNCTION_POINTER,
+  };
+
+  struct object_t {
+    uint8_t  type;
+    uint32_t count;
+    uint32_t size;
+  };
+
+  struct object_double_t : object_t {
+    double value;
+  };
+
+  struct object_integer_t : object_t {
+    int64_t value;
+  };
+
+  struct object_char_t : object_t {
+    char value;
+  };
+
+  struct object_function_pointer_t : object_t {
+    pointer_t value;
+  };
+
+  struct object_array_t : object_t {
+    object_t value[10];
+  };
+
+  struct allocator_t { // heap_t
+    std::array<uint8_t, 1000> buffer;
+    size_t pos = 0;
+
+    object_t* alloc(uint8_t type) { return nullptr; };
+
+    pointer_t alloc_object_double(double value) {
+      pointer_t ret = pos;
+      object_double_t* object = reinterpret_cast<object_double_t*>(buffer.data() + pos);
+      *object = { type_t::DOUBLE, 0, sizeof(value), value };
+      pos += sizeof(*object);
+      return ret;
+    };
+
+    pointer_t alloc_object_integer(int32_t value) {
+      pointer_t ret = pos;
+      object_integer_t* object = reinterpret_cast<object_integer_t*>(buffer.data() + pos);
+      *object = { type_t::INTEGER, 0, sizeof(value), value };
+      pos += sizeof(*object);
+      return ret;
+    };
+
+    object_t* get(pointer_t pointer) {
+      return reinterpret_cast<object_t*>(buffer.data() + pointer);
+    }
+
+    void dealloc(object_t* object) { };
+  };
+
+  // type_info: [u32:type, u8:size, u64:ctor, u64:dtor, ...]
+
+  struct function_info_t {
+    uint32_t                     pointer;
+    size_t                       args_count;
+    std::vector<instruction_t>   body;
+  };
+
+  using data_t  = std::deque<pointer_t>;
+
+  struct interpreter_t {
+    // using functions_t   = std::map<std::string, function_info_t>;
+    using bss_segment_t    = std::deque<pointer_t>;
+    using strtab_segment_t = std::map<std::string, pointer_t>;
+    using data_segment_t   = std::deque<pointer_t>;
+    using stack_t          = std::deque<pointer_t>;
+    // functions_t     functions;
+    allocator_t     allocator;
+    bss_segment_t   bss_segment;
+    data_segment_t  data_segment;
+    stack_t         stack;
+    pointer_t       rbp;
+    pointer_t       rsp;
+    pointer_t       rip;
+
+    void run() {
+      bss_segment = {
+        allocator.alloc_object_double(123.3),
+        allocator.alloc_object_double(-50.1),
+        allocator.alloc_object_integer(1),
+      };
+      data_segment = {
+        PUSH,
+        bss_segment[0],
+        PUSH,
+        bss_segment[1],
+        PUSH,
+        bss_segment[2],
+        INT,
+      };
+
+      rip = 0;
+      while (rip != data_segment.size()) {
+        pointer_t ins = data_segment.at(rip++);
+        switch (ins) {
+          case PUSH: {
+            pointer_t pointer = data_segment.at(rip++);
+            object_t* object = allocator.get(pointer);
+            object->count++;
+            stack.push_back(pointer);
+            break;
+          }
+          case INT: {
+            pointer_t op = stack.back();
+            stack.pop_back();
+            object_double_t* opnd2 = static_cast<object_double_t*>(allocator.get(stack.back()));
+            stack.pop_back();
+            object_double_t* opnd1 = static_cast<object_double_t*>(allocator.get(stack.back()));
+            stack.pop_back();
+
+            opnd1->count--;
+            opnd2->count--;
+
+            pointer_t res = allocator.alloc_object_double(opnd1->value + opnd2->value);
+            stack.push_back(res);
+            break;
+          }
+        }
+      }
+
+      if (stack.size() == 1) {
+        object_double_t* obj = static_cast<object_double_t*>(allocator.get(stack.back()));
+        printf("res: %f \n", obj->value);
+      }
+    }
+  };
+
+}
+
+
+
 enum instruction_t : uint8_t {
   UNK,
   LOAD,
@@ -128,19 +288,29 @@ struct ttype_t {
 struct type_t {
   virtual std::string name() = 0;
   virtual size_t size() = 0;
-  virtual void ctor(stream_t& stream, size_t pos = -1) = 0;
-  virtual void dtor(stream_t& stream, size_t pos = -1) = 0;
+  virtual void ctor() = 0;
+  virtual void cctor() = 0;
+  virtual void dtor() = 0;
   virtual void read(stream_t& stream, size_t pos = -1) = 0;
   virtual void write(stream_t& stream, size_t pos = -1) = 0;
 };
 
 using type_sptr_t = std::shared_ptr<type_t>;
 
+struct type_int_new_t {
+  int value;
+
+  std::string name() { return "i"; }
+  size_t size() { return sizeof(value); }
+  size_t ctor() { DEBUG_LOGGER_ULISP("ctor"); return 0; } // ip
+  size_t dtor() { DEBUG_LOGGER_ULISP("ctor"); return 0; }
+};
+
 struct type_int_t : type_t {
   std::string name() override { return "i"; }
   size_t size() override { return 4; }
-  void ctor(stream_t& stream, size_t pos = -1) override { DEBUG_LOGGER_ULISP("ctor"); }
-  void dtor(stream_t& stream, size_t pos = -1) override { DEBUG_LOGGER_ULISP("ctor"); }
+  void ctor() override { DEBUG_LOGGER_ULISP("ctor"); }
+  void dtor() override { DEBUG_LOGGER_ULISP("ctor"); }
 };
 
 
@@ -432,14 +602,14 @@ struct interpreter_t {
 ;   id: int
 ;   age: int
 ; end
-; 
+;
 ; type pint_t pointer int
-; 
+;
 ; type array_t struct
 ;   data: pint_t
 ;   size: int
 ; end
-; 
+;
 ; type string_t struct
 ;   data :pint_t
 ;   size :int
@@ -463,40 +633,49 @@ end
 // person.name -> &person + person_offset(name)
 
 int main() {
-  std::string code = R"ASM(
-    FUNC main
-    ARG
-    VAR
-    BEGIN
-      INTEGER 10
-      INTEGER 12
-      FUNCTION sum
-      CALL
-      INTEGER 14
-      FUNCTION sum
-      CALL
-    END
+  if (false)
+  {
+    std::string code = R"ASM(
+      FUNC main
+      ARG
+      VAR
+      BEGIN
+        INTEGER 10
+        INTEGER 12
+        FUNCTION sum
+        CALL
+        INTEGER 14
+        FUNCTION sum
+        CALL
+      END
 
-    FUNC sum
-    ARG
-      x int
-      y int
-    VAR
-      ret int
-    BEGIN
-      VARIABLE x
-      VARIABLE y
-      ADDI
-    END
-    )ASM";
+      FUNC sum
+      ARG
+        x int
+        y int
+      VAR
+        ret int
+      BEGIN
+        VARIABLE x
+        VARIABLE y
+        ADDI
+      END
+      )ASM";
 
-  auto data = analyzer_t::parse(code);
+    auto data = analyzer_t::parse(code);
 
-  interpreter_t interpreter(data);
-  interpreter.run();
+    interpreter_t interpreter(data);
+    interpreter.run();
 
-  std::cout << "in:  " << interpreter.in.hex() << std::endl;
-  std::cout << "out: " << interpreter.out.hex() << std::endl;
+    std::cout << "in:  " << interpreter.in.hex() << std::endl;
+    std::cout << "out: " << interpreter.out.hex() << std::endl;
+  }
+
+  {
+    using namespace yukoma;
+    yukoma::interpreter_t interpreter;
+    interpreter.run();
+  }
 
   return 0;
 }
